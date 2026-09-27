@@ -682,4 +682,4 @@ Access tokens are retained only in React state for the current page lifetime. Th
 
 ## GitHub Pages preparation
 
-For a project site, build with `VITE_BASE_PATH=/repository-name/ npm run build`. Add the deployed HTTPS origin to the OAuth client's Authorized JavaScript origins. Deployment automation is deliberately not enabled yet.
+This repository defaults to the GitHub Pages project path `/TrainingDash/`, matching `https://bobgsmith.github.io/TrainingDash/`. Override it for another deployment with `VITE_BASE_PATH=/another-path/ npm run build`. Add the deployed HTTPS origin to the OAuth client's Authorized JavaScript origins. Deployment automation is deliberately not enabled yet.
