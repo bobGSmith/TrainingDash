@@ -682,4 +682,6 @@ Access tokens are retained only in React state for the current page lifetime. Th
 
 ## GitHub Pages preparation
 
-This repository defaults to the GitHub Pages project path `/TrainingDash/`, matching `https://bobgsmith.github.io/TrainingDash/`. Override it for another deployment with `VITE_BASE_PATH=/another-path/ npm run build`. Add the deployed HTTPS origin to the OAuth client's Authorized JavaScript origins. Deployment automation is deliberately not enabled yet.
+This repository defaults to the GitHub Pages project path `/TrainingDash/`, matching `https://bobgsmith.github.io/TrainingDash/`. Override it for another deployment with `VITE_BASE_PATH=/another-path/ npm run build`.
+
+The Pages workflow builds and publishes `dist` on pushes to `main`. Configure a GitHub Actions repository variable named `VITE_GOOGLE_CLIENT_ID` under **Settings → Secrets and variables → Actions → Variables**. In **Settings → Pages**, select **GitHub Actions** as the source. Add `https://bobgsmith.github.io` (without the repository path) to the OAuth client's Authorized JavaScript origins.
