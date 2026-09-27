@@ -3,6 +3,7 @@ import type { ConnectionStatus } from '../hooks/useDashboardData';
 import type { NormalizedWorkbook } from '../data/normalized/types';
 import type { RawWorkbook } from '../data/raw/types';
 import { RawDataInspector } from './RawDataInspector';
+import { chronologicalPBProgression, jumpPBs, sprintPBs } from '../domain/pb';
 
 interface Props {
   athlete: AthleteConfig;
@@ -46,10 +47,11 @@ export function Overview(props: Props) {
         <StatusCard label="Access mode" value="Read only" state="ok" />
       </section>
 
-      {props.status === 'loading' && <div className="loading-panel"><span className="spinner" />Loading five spreadsheet tabs…</div>}
+      {props.status === 'loading' && <div className="loading-panel"><span className="spinner" />Loading six spreadsheet tabs…</div>}
 
       {props.rawWorkbook && (
         <>
+          {props.normalized && <AthleteOverview data={props.normalized} />}
           <section className="panel">
             <div className="section-heading"><div><p className="eyebrow">Import summary</p><h2>Rows loaded</h2></div><span className="live-pill">Live data</span></div>
             <div className="row-counts">
@@ -81,6 +83,32 @@ export function Overview(props: Props) {
       )}
     </div>
   );
+}
+
+function AthleteOverview({ data }: { data: NormalizedWorkbook }) {
+  const sprintTests = [...new Set(data.sprints.map((item) => item.test))];
+  const jumpTests = [...new Set(data.jumps.map((item) => `${item.test}|${item.unit}`))];
+  const sprintCards = sprintTests.map((test) => {
+    const rows = data.sprints.filter((item) => item.test === test);
+    const pb = sprintPBs(rows)[0];
+    const progression = chronologicalPBProgression(rows, (item) => item.timeSeconds, 'lower');
+    return pb ? { name: test, value: `${pb.timeSeconds.toFixed(3)} s`, date: pb.date, context: [pb.surface, pb.footwear, pb.leadInMetres != null ? `${pb.leadInMetres}m lead-in` : undefined].filter(Boolean).join(' · ') || 'Conditions unknown', change: progression.at(-1)?.improvement } : undefined;
+  }).filter(Boolean);
+  const jumpCards = jumpTests.map((identity) => {
+    const [test, unit] = identity.split('|');
+    const rows = data.jumps.filter((item) => item.test === test && item.unit === unit);
+    const pb = jumpPBs(rows)[0];
+    const progression = chronologicalPBProgression(rows, (item) => item.result, 'higher');
+    return pb ? { name: test!, value: `${pb.result} ${unit}`, date: pb.date, context: [pb.surface, pb.footwear].filter(Boolean).join(' · ') || 'Conditions unknown', change: progression.at(-1)?.improvement } : undefined;
+  }).filter(Boolean);
+  const cards = [...sprintCards, ...jumpCards].slice(0, 8);
+  const recentDates = [...new Set(data.training.map((row) => row.date).filter((date): date is string => Boolean(date)))].sort().reverse().slice(0, 4);
+  const recentStatus = [...data.dailyStatus].sort((a,b)=>(b.date??'').localeCompare(a.date??'')).slice(0, 3);
+  return <>
+    <section className="dashboard-section"><div className="section-heading"><div><p className="eyebrow">Current performance</p><h2>Recorded bests</h2></div></div><div className="pb-grid">{cards.map((card) => card && <article className="pb-card" key={`${card.name}-${card.value}`}><span>{card.name}</span><strong>{card.value}</strong><small>{card.date ?? 'Date unknown'}</small><p>{card.context}</p>{card.change != null && <em>{card.change.toFixed(3)} improvement from previous PB</em>}</article>)}</div></section>
+    <section className="dashboard-columns"><div><div className="section-heading"><div><p className="eyebrow">Recent training</p><h2>Actual sessions</h2></div></div>{recentDates.map((date) => { const rows=data.training.filter((row)=>row.date===date); return <article className="recent-row" key={date}><time>{date}</time><div><strong>{[...new Set(rows.map((r)=>r.session).filter(Boolean))].join(' / ') || 'Session'}</strong><span>{rows.length} recorded activities · {[...new Set(rows.map((r)=>r.category).filter(Boolean))].slice(0,3).join(', ')}</span></div></article>; })}</div>
+      <div><div className="section-heading"><div><p className="eyebrow">Recovery</p><h2>Recent observations</h2></div></div>{recentStatus.map((item)=><article className="recent-row" key={item.rowNumber}><time>{item.date ?? 'Unknown date'}</time><div><strong>{item.timepoint ?? 'Observation'}</strong><span>{item.context ?? item.notes}</span></div></article>)}</div></section>
+  </>;
 }
 
 function StatusCard({ label, value, state }: { label: string; value: string; state: 'ok' | 'error' | 'idle' }) {

@@ -1,7 +1,8 @@
 export const SHEET_TABS = [
-  'Data',
-  'Lifting top sets',
   'Full Session tracking',
+  'Sprinting PBs',
+  'Jumping PBs',
+  'Lifting PBs',
   'Daily Status',
   'Program',
 ] as const;

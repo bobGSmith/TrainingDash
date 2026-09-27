@@ -20,6 +20,9 @@ export interface SprintPerformance extends SourceReference, PerformanceContext {
   test: string;
   distanceMetres?: number;
   timeSeconds: number;
+  effortPercent?: number;
+  sets?: number;
+  symptoms?: string;
   notes?: string;
   extra?: Metadata;
 }
@@ -30,6 +33,8 @@ export interface JumpPerformance extends SourceReference, PerformanceContext {
   test: string;
   result: number;
   unit?: string;
+  sets?: number;
+  symptoms?: string;
   notes?: string;
   extra?: Metadata;
 }
@@ -55,6 +60,7 @@ export interface TrainingSession extends SourceReference {
   category?: string;
   exercise?: string;
   sets?: number;
+  setsText?: string;
   amount?: number;
   amountUnit?: string;
   intensity?: number;
@@ -65,6 +71,10 @@ export interface TrainingSession extends SourceReference {
   rawExtra?: string;
   symptoms?: string;
   notes?: string;
+  timingStart?: string;
+  leadInMetres?: number;
+  stance?: string;
+  effortPercent?: number;
 }
 
 export interface DailyStatusObservation extends SourceReference {
@@ -84,4 +94,3 @@ export interface NormalizedWorkbook {
   training: TrainingSession[];
   dailyStatus: DailyStatusObservation[];
 }
-

@@ -55,21 +55,17 @@ describe('normalisation', () => {
     expect(result.training).toEqual([]);
   });
 
-  it('recognises schema-labelled testing and lifting rows', () => {
+  it('derives sprint, jump, and strength performances from canonical session rows', () => {
     const result = normalizeWorkbook(workbook({
-      Data: [
-        ['Date', 'Test', 'Result', 'Surface', 'Footwear'],
-        ['01/09/2026', '10 m sprint', '1.75', 'Track', 'Spikes'],
-        ['02/09/2026', 'Standing broad jump', '2.8', 'Gym', 'Trainers'],
-      ],
-      'Lifting top sets': [
-        ['Date', 'Exercise', 'Load kg', 'Reps', 'RPE'],
-        ['03/09/2026', 'Backsquat', '120', '5', '8'],
+      'Full Session tracking': [
+        ['Date', 'Session', 'Category', 'Exercise', 'Sets', 'Amount', 'Amount Unit', 'Intensity', 'Intensity Unit', 'Surface', 'Footwear', 'Extra', 'Symptoms', 'Notes', 'Timing start', 'Lead-in (m)', 'Stance', 'Effort (%)'],
+        ['01/09/2026', 'Sprint', 'Acceleration', '10 m start', '2', '10', 'm', '1.75', 's', 'Track', 'Spikes', '', '', '', 'Lead-in', '1', '3-point', '100'],
+        ['02/09/2026', 'Sprint', 'Plyometric', 'Standing broad jump', '1', '1', 'attempt', '2.8', 'm', 'Gym', 'Trainers'],
+        ['03/09/2026', 'A', 'Strength', 'Backsquat', '1', '5', 'reps', '120', 'kg', '', '', 'RPE 8; Velocity 1.2 m/s'],
       ],
     }));
-    expect(result.sprints[0]).toMatchObject({ timeSeconds: 1.75, distanceMetres: 10, surface: 'Track' });
+    expect(result.sprints[0]).toMatchObject({ timeSeconds: 1.75, distanceMetres: 10, surface: 'Track', leadInMetres: 1, startType: '3-point' });
     expect(result.jumps[0]).toMatchObject({ result: 2.8, footwear: 'Trainers' });
-    expect(result.strength[0]).toMatchObject({ exercise: 'Back squat', sourceExercise: 'Backsquat', loadKg: 120, reps: 5 });
+    expect(result.strength[0]).toMatchObject({ exercise: 'Back squat', sourceExercise: 'Backsquat', loadKg: 120, reps: 5, rpe: 8, velocityMps: 1.2 });
   });
 });
-

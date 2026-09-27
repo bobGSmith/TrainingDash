@@ -6,7 +6,7 @@ import type { RawWorkbook } from '../data/raw/types';
 const PREVIEW_ROWS = 50;
 
 export function RawDataInspector({ workbook }: { workbook: RawWorkbook }) {
-  const [tab, setTab] = useState<SheetTab>('Data');
+  const [tab, setTab] = useState<SheetTab>('Full Session tracking');
   const sheet = workbook[tab];
   const headers = sheet.rows[0] ?? [];
   const dataRows = sheet.rows.slice(1, PREVIEW_ROWS + 1);

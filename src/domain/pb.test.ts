@@ -3,10 +3,10 @@ import type { JumpPerformance, SprintPerformance, StrengthPerformance } from '..
 import { chronologicalPBProgression, groupByComparison, jumpPBs, liftingPBFrontier, sprintComparisonKey, sprintPBs } from './pb';
 
 const sprint = (timeSeconds: number, rowNumber: number, extra: Partial<SprintPerformance> = {}): SprintPerformance => ({
-  kind: 'sprint', tab: 'Data', test: '10 m', timeSeconds, rowNumber, date: `2026-01-${String(rowNumber).padStart(2, '0')}`, ...extra,
+  kind: 'sprint', tab: 'Full Session tracking', test: '10 m', timeSeconds, rowNumber, date: `2026-01-${String(rowNumber).padStart(2, '0')}`, ...extra,
 });
-const jump = (result: number, rowNumber: number): JumpPerformance => ({ kind: 'jump', tab: 'Data', test: 'CMJ', result, rowNumber });
-const lift = (loadKg: number, reps: number, rowNumber: number): StrengthPerformance => ({ kind: 'strength', tab: 'Lifting top sets', exercise: 'Back squat', sourceExercise: 'Back squat', loadKg, reps, rowNumber });
+const jump = (result: number, rowNumber: number): JumpPerformance => ({ kind: 'jump', tab: 'Full Session tracking', test: 'CMJ', result, rowNumber });
+const lift = (loadKg: number, reps: number, rowNumber: number): StrengthPerformance => ({ kind: 'strength', tab: 'Full Session tracking', exercise: 'Back squat', sourceExercise: 'Back squat', loadKg, reps, rowNumber });
 
 describe('performance PBs', () => {
   it('uses lower for sprinting and returns all tied PB performances', () => {

@@ -21,6 +21,11 @@ export function optionalInteger(value: unknown): number | undefined {
 }
 
 export function parseDate(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const milliseconds = Date.UTC(1899, 11, 30) + value * 86_400_000;
+    const serialDate = new Date(milliseconds);
+    return formatDate(serialDate.getUTCFullYear(), serialDate.getUTCMonth() + 1, serialDate.getUTCDate());
+  }
   const text = optionalText(value);
   if (!text) return undefined;
 
@@ -83,4 +88,3 @@ export function pick(record: RowRecord, ...names: string[]): string | undefined 
   }
   return undefined;
 }
-

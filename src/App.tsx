@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Overview } from './components/Overview';
 import { DEFAULT_ATHLETE } from './config/athletes';
 import { useDashboardData } from './hooks/useDashboardData';
+import { JumpPage, RecoveryPage, SprintPage, StrengthPage, TrainingPage } from './components/AthleticPages';
 
 const SECTIONS = ['Overview', 'Sprint', 'Jumps', 'Strength', 'Training', 'Recovery'] as const;
 type Section = (typeof SECTIONS)[number];
@@ -34,6 +35,12 @@ export default function App() {
               onSignOut={dashboard.signOut}
               onReload={dashboard.reload}
             />
+          ) : dashboard.normalized ? (
+            section === 'Sprint' ? <SprintPage data={dashboard.normalized} /> :
+            section === 'Jumps' ? <JumpPage data={dashboard.normalized} /> :
+            section === 'Strength' ? <StrengthPage data={dashboard.normalized} /> :
+            section === 'Training' ? <TrainingPage data={dashboard.normalized} /> :
+            <RecoveryPage data={dashboard.normalized} />
           ) : <Placeholder section={section} />}
         </div>
         <nav className="mobile-nav" aria-label="Mobile navigation">

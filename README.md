@@ -685,3 +685,19 @@ Access tokens are retained only in React state for the current page lifetime. Th
 This repository defaults to the GitHub Pages project path `/TrainingDash/`, matching `https://bobgsmith.github.io/TrainingDash/`. Override it for another deployment with `VITE_BASE_PATH=/another-path/ npm run build`.
 
 The Pages workflow builds and publishes `dist` on pushes to `main`. Configure a GitHub Actions repository variable named `VITE_GOOGLE_CLIENT_ID` under **Settings → Secrets and variables → Actions → Variables**. In **Settings → Pages**, select **GitHub Actions** as the source. Add `https://bobgsmith.github.io` (without the repository path) to the OAuth client's Authorized JavaScript origins.
+
+## Verified live workbook model (September 2026)
+
+The current workbook was inspected read-only through the connected Google Drive account. Its live tabs are `Full Session tracking`, `Sprinting PBs`, `Jumping PBs`, `Lifting PBs`, `Daily Status`, and `Program`.
+
+`Full Session tracking` is the canonical observation table and currently includes both migrated historical observations and recent performed sessions. Sprint, jump, and strength application records are derived from its `Category`, `Exercise`, `Amount`, `Amount Unit`, `Intensity`, and `Intensity Unit` fields. The four protocol columns after `Notes`—`Timing start`, `Lead-in (m)`, `Stance`, and `Effort (%)`—are also retained.
+
+The three PB tabs explicitly identify themselves as automatically derived from `Full Session tracking`; the app therefore uses them only for validation and calculates its own PBs from canonical observations. `Program` remains intended work and is excluded from performed-training and PB calculations.
+
+The live data contains several intentional mixed-schema patterns:
+
+- `Sets` may be numeric, blank, or qualitative (for example `Few`).
+- `Extra` may be JSON, free text, an RPE value, velocity text, or a qualitative protocol label.
+- timed warm-ups and submaximal efforts coexist with maximal performances
+- jump tests can use metres, centimetres, or RSI, and test name plus unit defines the measurement identity
+- missing surface, footwear, pain, RPE, velocity, and protocol remain unknown
