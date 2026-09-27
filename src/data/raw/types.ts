@@ -5,11 +5,12 @@ export type RawRow = RawCell[];
 
 export interface RawSheet {
   tab: SheetTab;
+  sourceTitle?: string;
   range: string;
   majorDimension: 'ROWS';
   rows: RawRow[];
   fetchedAt: string;
+  error?: string;
 }
 
 export type RawWorkbook = Record<SheetTab, RawSheet>;
-

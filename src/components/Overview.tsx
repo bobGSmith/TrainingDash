@@ -54,7 +54,12 @@ export function Overview(props: Props) {
             <div className="section-heading"><div><p className="eyebrow">Import summary</p><h2>Rows loaded</h2></div><span className="live-pill">Live data</span></div>
             <div className="row-counts">
               {props.athlete.tabs.map((tab) => (
-                <div className="row-count" key={tab}><span>{tab}</span><strong>{Math.max(props.rawWorkbook![tab].rows.length - 1, 0)}</strong></div>
+                <div className="row-count" key={tab} title={props.rawWorkbook![tab].error}>
+                  <span>{tab}</span>
+                  {props.rawWorkbook![tab].error
+                    ? <strong className="missing-tab">Missing</strong>
+                    : <strong>{Math.max(props.rawWorkbook![tab].rows.length - 1, 0)}</strong>}
+                </div>
               ))}
             </div>
           </section>

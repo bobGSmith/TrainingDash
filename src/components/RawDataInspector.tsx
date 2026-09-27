@@ -26,10 +26,13 @@ export function RawDataInspector({ workbook }: { workbook: RawWorkbook }) {
         </label>
       </div>
       <p className="muted">
+        {sheet.sourceTitle && sheet.sourceTitle !== tab ? `Matched source tab “${sheet.sourceTitle}”. ` : ''}
         Showing {Math.min(dataRows.length, PREVIEW_ROWS)} of {Math.max(sheet.rows.length - 1, 0)} data rows.
         Values below are unmodified API results.
       </p>
-      {sheet.rows.length === 0 ? (
+      {sheet.error ? (
+        <div className="notice error" role="alert"><strong>Configured tab unavailable</strong><span>{sheet.error}</span></div>
+      ) : sheet.rows.length === 0 ? (
         <div className="empty-state">This tab returned no values.</div>
       ) : (
         <div className="table-scroll" tabIndex={0}>
@@ -49,4 +52,3 @@ export function RawDataInspector({ workbook }: { workbook: RawWorkbook }) {
     </section>
   );
 }
-
