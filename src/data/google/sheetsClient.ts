@@ -3,16 +3,25 @@ import type { RawSheet, RawWorkbook } from '../raw/types';
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 
-interface BatchGetResponse {
-  valueRanges?: Array<{
-    range?: string;
-    majorDimension?: 'ROWS' | 'COLUMNS';
-    values?: unknown[][];
-  }>;
+interface ValueRangeResponse {
+  range?: string;
+  majorDimension?: 'ROWS' | 'COLUMNS';
+  values?: unknown[][];
 }
 
 interface SpreadsheetMetadataResponse {
-  sheets?: Array<{ properties?: { title?: string } }>;
+  sheets?: Array<{ properties?: { title?: string; gridProperties?: { rowCount?: number; columnCount?: number } } }>;
+}
+
+function columnName(columnCount: number): string {
+  let value = Math.max(1, columnCount);
+  let result = '';
+  while (value > 0) {
+    value -= 1;
+    result = String.fromCharCode(65 + (value % 26)) + result;
+    value = Math.floor(value / 26);
+  }
+  return result;
 }
 
 export class SheetsApiError extends Error {
@@ -64,7 +73,7 @@ export async function fetchWorkbook(
   signal?: AbortSignal,
 ): Promise<RawWorkbook> {
   const headers = { Authorization: `Bearer ${accessToken}` };
-  const metadataQuery = new URLSearchParams({ fields: 'sheets.properties.title' });
+  const metadataQuery = new URLSearchParams({ fields: 'sheets.properties(title,gridProperties(rowCount,columnCount))' });
   const metadataResponse = await fetch(
     `${SHEETS_API}/${encodeURIComponent(athlete.spreadsheetId)}?${metadataQuery}`,
     { headers, signal },
@@ -72,37 +81,43 @@ export async function fetchWorkbook(
   if (!metadataResponse.ok) throw await responseError(metadataResponse);
 
   const metadata = (await metadataResponse.json()) as SpreadsheetMetadataResponse;
-  const availableTitles = (metadata.sheets ?? [])
-    .map((sheet) => sheet.properties?.title)
-    .filter((title): title is string => Boolean(title));
+  const availableSheets = (metadata.sheets ?? [])
+    .flatMap((sheet) => sheet.properties?.title ? [{
+      title: sheet.properties.title,
+      rowCount: sheet.properties.gridProperties?.rowCount ?? 1000,
+      columnCount: sheet.properties.gridProperties?.columnCount ?? 26,
+    }] : []);
+  const availableTitles = availableSheets
+    .map((sheet) => sheet.title);
   const resolvedTitles = resolveTabTitles(athlete.tabs, availableTitles);
   const resolvedTabs = athlete.tabs.flatMap((tab) => {
     const sourceTitle = resolvedTitles.get(tab);
-    return sourceTitle ? [{ tab, sourceTitle }] : [];
+    const grid = availableSheets.find((sheet) => sheet.title === sourceTitle);
+    return sourceTitle && grid ? [{ tab, sourceTitle, ...grid }] : [];
   });
 
-  const query = new URLSearchParams();
-  resolvedTabs.forEach(({ sourceTitle }) => query.append('ranges', `'${sourceTitle.replaceAll("'", "''")}'`));
-  query.set('majorDimension', 'ROWS');
-  query.set('valueRenderOption', 'UNFORMATTED_VALUE');
-  query.set('dateTimeRenderOption', 'FORMATTED_STRING');
-
-  let body: BatchGetResponse = {};
-  if (resolvedTabs.length > 0) {
+  const fetchedRanges = new Map<SheetTab, ValueRangeResponse>();
+  await Promise.all(resolvedTabs.map(async ({ tab, sourceTitle, rowCount, columnCount }) => {
+    const escapedTitle = sourceTitle.replaceAll("'", "''");
+    const a1Range = `'${escapedTitle}'!A1:${columnName(columnCount)}${rowCount}`;
+    const query = new URLSearchParams({
+      majorDimension: 'ROWS',
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'FORMATTED_STRING',
+    });
     const response = await fetch(
-      `${SHEETS_API}/${encodeURIComponent(athlete.spreadsheetId)}/values:batchGet?${query}`,
+      `${SHEETS_API}/${encodeURIComponent(athlete.spreadsheetId)}/values/${encodeURIComponent(a1Range)}?${query}`,
       { headers, signal },
     );
     if (!response.ok) throw await responseError(response);
-    body = (await response.json()) as BatchGetResponse;
-  }
+    fetchedRanges.set(tab, (await response.json()) as ValueRangeResponse);
+  }));
   const fetchedAt = new Date().toISOString();
   const workbook = {} as RawWorkbook;
 
   athlete.tabs.forEach((tab) => {
-    const resolvedIndex = resolvedTabs.findIndex((entry) => entry.tab === tab);
     const sourceTitle = resolvedTitles.get(tab);
-    const valueRange = resolvedIndex >= 0 ? body.valueRanges?.[resolvedIndex] : undefined;
+    const valueRange = fetchedRanges.get(tab);
     const missingMessage = sourceTitle ? undefined : `Tab not found. Available tabs: ${availableTitles.join(', ') || 'none'}.`;
     const sheet: RawSheet = {
       tab,

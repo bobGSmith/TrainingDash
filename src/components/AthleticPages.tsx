@@ -3,6 +3,7 @@ import type { NormalizedWorkbook, SprintPerformance } from '../data/normalized/t
 import { jumpPBs, liftingPBFrontier, sprintPBs } from '../domain/pb';
 import { buildPerformanceCurve, compatibleCurveExercises } from '../domain/performanceCurve';
 import { PerformanceCurve, ProgressChart, type ChartDatum } from './Charts';
+import { filterSprintPerformances } from '../domain/sprint';
 
 function PageHeader({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) {
   return <header className="page-header"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></header>;
@@ -13,11 +14,14 @@ export function SprintPage({ data }: { data: NormalizedWorkbook }) {
   const [test, setTest] = useState(tests[0] ?? '');
   const [surface, setSurface] = useState('All');
   const [footwear, setFootwear] = useState('All');
-  const filtered = data.sprints.filter((item) => item.test === test && (surface === 'All' || item.surface === surface) && (footwear === 'All' || item.footwear === footwear));
+  const [leadIn, setLeadIn] = useState('All');
+  const leadInFilter = leadIn === 'All' ? undefined : leadIn === 'Unknown' ? 'unknown' as const : Number(leadIn);
+  const filtered = filterSprintPerformances(data.sprints, { test, surface, footwear, leadInMetres: leadInFilter });
+  const leadIns = [...new Set(data.sprints.filter((item) => item.test === test && item.leadInMetres != null).map((item) => item.leadInMetres!))].sort((a, b) => a - b);
   const pb = sprintPBs(filtered)[0];
   const chart: ChartDatum[] = [...filtered].sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '')).map((item) => ({ id: String(item.rowNumber), date: item.date, value: item.timeSeconds, label: `${item.test} · ${item.timeSeconds}s`, detail: sprintDetail(item) }));
   return <><PageHeader eyebrow="Speed" title="Sprint performance" copy="Compare timed performances without losing protocol or conditions." />
-    <section className="panel controls"><label>Test<select value={test} onChange={(e) => setTest(e.target.value)}>{tests.map((value) => <option key={value}>{value}</option>)}</select></label><label>Surface<select value={surface} onChange={(e) => setSurface(e.target.value)}>{['All', ...new Set(data.sprints.map((x) => x.surface).filter(Boolean))].map((value) => <option key={value}>{value}</option>)}</select></label><label>Footwear<select value={footwear} onChange={(e) => setFootwear(e.target.value)}>{['All', ...new Set(data.sprints.map((x) => x.footwear).filter(Boolean))].map((value) => <option key={value}>{value}</option>)}</select></label></section>
+    <section className="panel controls"><label>Test<select value={test} onChange={(e) => { setTest(e.target.value); setLeadIn('All'); }}>{tests.map((value) => <option key={value}>{value}</option>)}</select></label><label>Surface<select value={surface} onChange={(e) => setSurface(e.target.value)}>{['All', ...new Set(data.sprints.map((x) => x.surface).filter(Boolean))].map((value) => <option key={value}>{value}</option>)}</select></label><label>Footwear<select value={footwear} onChange={(e) => setFootwear(e.target.value)}>{['All', ...new Set(data.sprints.map((x) => x.footwear).filter(Boolean))].map((value) => <option key={value}>{value}</option>)}</select></label><label>Lead-in<select value={leadIn} onChange={(e) => setLeadIn(e.target.value)}><option>All</option>{leadIns.map((value) => <option value={String(value)} key={value}>{value} m</option>)}<option>Unknown</option></select></label></section>
     {pb && <section className="metric-hero"><span>Best in current filter</span><strong>{pb.timeSeconds.toFixed(3)} s</strong><p>{pb.date ?? 'Unknown date'} · {sprintDetail(pb)}</p></section>}
     <section className="panel"><h2>Performance over time</h2><ProgressChart data={chart} lowerIsBetter unit="s" /></section>
     <ObservationTable rows={filtered.map((x) => ({ date: x.date, performance: `${x.timeSeconds}s`, context: sprintDetail(x) }))} />
