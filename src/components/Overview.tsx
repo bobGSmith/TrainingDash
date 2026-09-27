@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import type { AthleteConfig } from '../config/athletes';
 import type { ConnectionStatus } from '../hooks/useDashboardData';
 import type { NormalizedWorkbook } from '../data/normalized/types';
 import type { RawWorkbook } from '../data/raw/types';
 import { RawDataInspector } from './RawDataInspector';
 import { chronologicalPBProgression, jumpPBs, sprintPBs } from '../domain/pb';
+import { latestRecordedDate, withinLookback, type LookbackWindow } from '../domain/lookback';
 
 interface Props {
   athlete: AthleteConfig;
@@ -86,26 +88,36 @@ export function Overview(props: Props) {
 }
 
 function AthleteOverview({ data }: { data: NormalizedWorkbook }) {
-  const sprintTests = [...new Set(data.sprints.map((item) => item.test))];
-  const jumpTests = [...new Set(data.jumps.map((item) => `${item.test}|${item.unit}`))];
+  const [lookback, setLookback] = useState<LookbackWindow>(30);
+  const latestDate = latestRecordedDate([...data.sprints, ...data.jumps, ...data.strength]);
+  const sprints = withinLookback(data.sprints, lookback, latestDate);
+  const jumps = withinLookback(data.jumps, lookback, latestDate);
+  const strength = withinLookback(data.strength, lookback, latestDate);
+  const sprintTests = [...new Set(sprints.map((item) => item.test))];
+  const jumpTests = [...new Set(jumps.map((item) => `${item.test}|${item.unit}`))];
   const sprintCards = sprintTests.map((test) => {
-    const rows = data.sprints.filter((item) => item.test === test);
+    const rows = sprints.filter((item) => item.test === test);
     const pb = sprintPBs(rows)[0];
     const progression = chronologicalPBProgression(rows, (item) => item.timeSeconds, 'lower');
     return pb ? { name: test, value: `${pb.timeSeconds.toFixed(3)} s`, date: pb.date, context: [pb.surface, pb.footwear, pb.leadInMetres != null ? `${pb.leadInMetres}m lead-in` : undefined].filter(Boolean).join(' · ') || 'Conditions unknown', change: progression.at(-1)?.improvement } : undefined;
   }).filter(Boolean);
   const jumpCards = jumpTests.map((identity) => {
     const [test, unit] = identity.split('|');
-    const rows = data.jumps.filter((item) => item.test === test && item.unit === unit);
+    const rows = jumps.filter((item) => item.test === test && item.unit === unit);
     const pb = jumpPBs(rows)[0];
     const progression = chronologicalPBProgression(rows, (item) => item.result, 'higher');
     return pb ? { name: test!, value: `${pb.result} ${unit}`, date: pb.date, context: [pb.surface, pb.footwear].filter(Boolean).join(' · ') || 'Conditions unknown', change: progression.at(-1)?.improvement } : undefined;
   }).filter(Boolean);
-  const cards = [...sprintCards, ...jumpCards].slice(0, 8);
+  const strengthCards = [...new Set(strength.map((item) => item.exercise))].map((exercise) => {
+    const rows = strength.filter((item) => item.exercise === exercise).sort((a, b) => b.loadKg - a.loadKg || b.reps - a.reps);
+    const best = rows[0];
+    return best ? { name: exercise, value: `${best.loadKg} kg × ${best.reps}`, date: best.date, context: [best.rpe != null ? `RPE ${best.rpe}` : undefined, best.velocityMps != null ? `${best.velocityMps} m/s` : undefined].filter(Boolean).join(' · ') || 'No RPE or velocity recorded', change: undefined } : undefined;
+  }).filter(Boolean);
+  const cards = [...sprintCards, ...jumpCards, ...strengthCards].sort((a, b) => (b?.date ?? '').localeCompare(a?.date ?? '')).slice(0, 12);
   const recentDates = [...new Set(data.training.map((row) => row.date).filter((date): date is string => Boolean(date)))].sort().reverse().slice(0, 4);
   const recentStatus = [...data.dailyStatus].sort((a,b)=>(b.date??'').localeCompare(a.date??'')).slice(0, 3);
   return <>
-    <section className="dashboard-section"><div className="section-heading"><div><p className="eyebrow">Current performance</p><h2>Recorded bests</h2></div></div><div className="pb-grid">{cards.map((card) => card && <article className="pb-card" key={`${card.name}-${card.value}`}><span>{card.name}</span><strong>{card.value}</strong><small>{card.date ?? 'Date unknown'}</small><p>{card.context}</p>{card.change != null && <em>{card.change.toFixed(3)} improvement from previous PB</em>}</article>)}</div></section>
+    <section className="dashboard-section"><div className="section-heading"><div><p className="eyebrow">Current performance</p><h2>Best recent performances</h2><p className="muted">Window anchored to the latest recorded performance{latestDate ? ` (${latestDate})` : ''}.</p></div><label className="select-label"><span>Look back</span><select value={lookback} onChange={(event) => setLookback(event.target.value === 'all' ? 'all' : Number(event.target.value) as 30 | 90)}><option value="30">30 days</option><option value="90">90 days</option><option value="all">All time</option></select></label></div>{cards.length ? <div className="pb-grid">{cards.map((card) => card && <article className="pb-card" key={`${card.name}-${card.value}`}><span>{card.name}</span><strong>{card.value}</strong><small>{card.date ?? 'Date unknown'}</small><p>{card.context}</p>{card.change != null && <em>{card.change.toFixed(3)} improvement within selected window</em>}</article>)}</div> : <div className="empty-state">No measured performances in this window.</div>}</section>
     <section className="dashboard-columns"><div><div className="section-heading"><div><p className="eyebrow">Recent training</p><h2>Actual sessions</h2></div></div>{recentDates.map((date) => { const rows=data.training.filter((row)=>row.date===date); return <article className="recent-row" key={date}><time>{date}</time><div><strong>{[...new Set(rows.map((r)=>r.session).filter(Boolean))].join(' / ') || 'Session'}</strong><span>{rows.length} recorded activities · {[...new Set(rows.map((r)=>r.category).filter(Boolean))].slice(0,3).join(', ')}</span></div></article>; })}</div>
       <div><div className="section-heading"><div><p className="eyebrow">Recovery</p><h2>Recent observations</h2></div></div>{recentStatus.map((item)=><article className="recent-row" key={item.rowNumber}><time>{item.date ?? 'Unknown date'}</time><div><strong>{item.timepoint ?? 'Observation'}</strong><span>{item.context ?? item.notes}</span></div></article>)}</div></section>
   </>;
