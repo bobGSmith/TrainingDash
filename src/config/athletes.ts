@@ -1,0 +1,41 @@
+export const SHEET_TABS = [
+  'Data',
+  'Lifting top sets',
+  'Full Session tracking',
+  'Daily Status',
+  'Program',
+] as const;
+
+export type SheetTab = (typeof SHEET_TABS)[number];
+
+export interface AthleteConfig {
+  id: string;
+  name: string;
+  spreadsheetId: string;
+  tabs: readonly SheetTab[];
+  enabledModules: {
+    sprint: boolean;
+    jumps: boolean;
+    strength: boolean;
+    training: boolean;
+    recovery: boolean;
+  };
+}
+
+export const ATHLETES: readonly AthleteConfig[] = [
+  {
+    id: 'owner',
+    name: 'Athleticism Testing',
+    spreadsheetId: '1-RT8KGmUdYjU6jjuxKDmfbrA4cWBSeQH8biV6AUSgeM',
+    tabs: SHEET_TABS,
+    enabledModules: {
+      sprint: true,
+      jumps: true,
+      strength: true,
+      training: true,
+      recovery: true,
+    },
+  },
+] as const;
+
+export const DEFAULT_ATHLETE: AthleteConfig = ATHLETES[0]!;
