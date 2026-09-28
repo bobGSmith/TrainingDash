@@ -25,30 +25,23 @@ export function Overview(props: Props) {
   const statusLabel = props.status === 'connected' ? 'Connected' : props.status === 'loading' ? 'Loading…' : props.status === 'error' ? 'Needs attention' : 'Not connected';
   return (
     <div className="overview">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">{props.athlete.name}</p>
-          <h1>Your performance data,<br />ready to inspect.</h1>
-          <p className="hero-copy">A private, read-only view of training, testing, strength, and recovery records.</p>
-        </div>
+      <header className="overview-banner">
+        <div className="overview-title"><span className="brand-mark">AP</span><h1>{props.athlete.name}</h1></div>
+        <div className="overview-actions">
         {!props.authenticated ? (
           <button className="primary-button" onClick={props.onSignIn} disabled={!props.clientConfigured}>Sign in with Google</button>
         ) : (
           <div className="button-row">
-            <button className="primary-button" onClick={props.onReload} disabled={props.status === 'loading'}>Refresh data</button>
-            <button className="secondary-button" onClick={props.onSignOut}>Sign out</button>
+            <button className="compact-button primary-button" onClick={props.onReload} disabled={props.status === 'loading'}>Refresh</button>
+            <button className="compact-button secondary-button" onClick={props.onSignOut}>Sign out</button>
           </div>
         )}
-      </section>
+          <details className="connection-popover"><summary aria-label="Connection details"><span className={`status-dot ${props.authenticated && props.status === 'connected' ? 'ok' : props.status === 'error' ? 'error' : ''}`} />Status</summary><div><StatusLine label="Google" value={props.authenticated ? 'Authenticated' : 'Signed out'} state={props.authenticated ? 'ok' : 'idle'} /><StatusLine label="Spreadsheet" value={statusLabel} state={props.status === 'connected' ? 'ok' : props.status === 'error' ? 'error' : 'idle'} /><StatusLine label="Access" value="Read only" state="ok" /></div></details>
+        </div>
+      </header>
 
       {!props.clientConfigured && <div className="notice error"><strong>Configuration needed</strong><span>Add VITE_GOOGLE_CLIENT_ID to your local .env file, then restart Vite.</span></div>}
       {props.error && <div className="notice error" role="alert"><strong>Connection failed</strong><span>{props.error}</span></div>}
-
-      <section className="status-grid" aria-label="Connection status">
-        <StatusCard label="Google authentication" value={props.authenticated ? 'Authenticated' : 'Signed out'} state={props.authenticated ? 'ok' : 'idle'} />
-        <StatusCard label="Spreadsheet connection" value={statusLabel} state={props.status === 'connected' ? 'ok' : props.status === 'error' ? 'error' : 'idle'} />
-        <StatusCard label="Access mode" value="Read only" state="ok" />
-      </section>
 
       {props.status === 'loading' && <div className="loading-panel"><span className="spinner" />Loading six spreadsheet tabs…</div>}
 
@@ -123,6 +116,6 @@ function AthleteOverview({ data }: { data: NormalizedWorkbook }) {
   </>;
 }
 
-function StatusCard({ label, value, state }: { label: string; value: string; state: 'ok' | 'error' | 'idle' }) {
-  return <div className="status-card"><span className={`status-dot ${state}`} /><div><span>{label}</span><strong>{value}</strong></div></div>;
+function StatusLine({ label, value, state }: { label: string; value: string; state: 'ok' | 'error' | 'idle' }) {
+  return <span className="status-line"><span className={`status-dot ${state}`} /><span>{label}</span><strong>{value}</strong></span>;
 }
