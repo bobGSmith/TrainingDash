@@ -6,12 +6,20 @@ export interface SeriesObservation {
   unit?: string;
   direction?: 'higher' | 'lower' | 'neutral';
   context?: string;
+  sourceReference?: { tab: string; rowNumber: number };
+  metadata?: Record<string, unknown>;
 }
 
 export interface PairedObservation {
   x: SeriesObservation;
   y: SeriesObservation;
   dayDifference: number;
+  xValue: number;
+  yValue: number;
+  xDate: string;
+  yDate: string;
+  xObservationReference?: SeriesObservation['sourceReference'];
+  yObservationReference?: SeriesObservation['sourceReference'];
 }
 
 export type PairingStrategy = 'same-day' | 'nearest';
@@ -21,6 +29,7 @@ export interface AnalysisSummary {
   n: number;
   pearsonR?: number;
   spearmanRho?: number;
+  pearsonP?: number;
   regression?: { slope: number; intercept: number };
 }
 
@@ -48,7 +57,7 @@ export function pairSeries(
     const match = candidates[0];
     if (!match) continue;
     usedY.add(match.y.id);
-    pairs.push({ x, y: match.y, dayDifference: match.difference });
+    pairs.push({ x, y: match.y, dayDifference: match.difference, xValue: x.value, yValue: match.y.value, xDate: x.date, yDate: match.y.date, xObservationReference: x.sourceReference, yObservationReference: match.y.sourceReference });
   }
   return pairs;
 }
@@ -88,6 +97,57 @@ export function spearman(values: readonly [number, number][]): number | undefine
   return pearson(xRanks.map((rank, index) => [rank, yRanks[index]!]));
 }
 
+// Lanczos log-gamma and continued-fraction incomplete beta, used for a two-sided
+// Student-t p-value without adding a heavyweight statistics dependency.
+function logGamma(value: number): number {
+  const coefficients = [676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406, 12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7];
+  if (value < .5) return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * value)) - logGamma(1 - value);
+  let x = .9999999999998099;
+  const z = value - 1;
+  coefficients.forEach((coefficient, index) => { x += coefficient / (z + index + 1); });
+  const t = z + coefficients.length - .5;
+  return .5 * Math.log(2 * Math.PI) + (z + .5) * Math.log(t) - t + Math.log(x);
+}
+
+function betaFraction(a: number, b: number, x: number): number {
+  const maxIterations = 200, epsilon = 3e-12, floor = 1e-30;
+  const qab = a + b, qap = a + 1, qam = a - 1;
+  let c = 1, d = 1 - qab * x / qap;
+  if (Math.abs(d) < floor) d = floor;
+  d = 1 / d;
+  let result = d;
+  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    const m2 = 2 * iteration;
+    let term = iteration * (b - iteration) * x / ((qam + m2) * (a + m2));
+    d = 1 + term * d; if (Math.abs(d) < floor) d = floor;
+    c = 1 + term / c; if (Math.abs(c) < floor) c = floor;
+    d = 1 / d; result *= d * c;
+    term = -(a + iteration) * (qab + iteration) * x / ((a + m2) * (qap + m2));
+    d = 1 + term * d; if (Math.abs(d) < floor) d = floor;
+    c = 1 + term / c; if (Math.abs(c) < floor) c = floor;
+    d = 1 / d;
+    const delta = d * c;
+    result *= delta;
+    if (Math.abs(delta - 1) < epsilon) break;
+  }
+  return result;
+}
+
+function regularizedBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const front = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  return x < (a + 1) / (a + b + 2) ? front * betaFraction(a, b, x) / a : 1 - front * betaFraction(b, a, 1 - x) / b;
+}
+
+export function pearsonPValue(r: number | undefined, n: number): number | undefined {
+  if (r == null || n < 3 || !Number.isFinite(r)) return undefined;
+  if (Math.abs(r) >= 1) return 0;
+  const degrees = n - 2;
+  const tSquared = r * r * degrees / (1 - r * r);
+  return regularizedBeta(degrees / (degrees + tSquared), degrees / 2, .5);
+}
+
 export function analyseSeries(
   xSeries: readonly SeriesObservation[],
   ySeries: readonly SeriesObservation[],
@@ -98,6 +158,7 @@ export function analyseSeries(
   const values = pairs.map((pair): [number, number] => [pair.x.value, pair.y.value]);
   const pearsonR = pearson(values);
   const spearmanRho = spearman(values);
+  const pearsonP = pearsonPValue(pearsonR, pairs.length);
   let regression: AnalysisSummary['regression'];
   if (pearsonR != null) {
     const xMean = values.reduce((sum, [x]) => sum + x, 0) / values.length;
@@ -108,6 +169,5 @@ export function analyseSeries(
       regression = { slope, intercept: yMean - slope * xMean };
     }
   }
-  return { pairs, n: pairs.length, pearsonR, spearmanRho, regression };
+  return { pairs, n: pairs.length, pearsonR, spearmanRho, pearsonP, regression };
 }
-

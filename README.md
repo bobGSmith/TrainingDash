@@ -684,6 +684,10 @@ Access tokens are retained only in React state for the current page lifetime. Th
 
 The Analysis page derives selectable numeric series from performed-training fields and numeric `Extra` metadata. Its nearest-observation mode uses each observation at most once and always reports the date separation. Missing measurements are omitted, never converted to zero. Correlations describe associations in the recorded observations and should not be interpreted as causal evidence.
 
+Analysis has two complementary modes. **Explore** provides explicit X/Y selection, same-day or nearest-within-window pairing, raw paired observations, Pearson and Spearman correlations, a two-sided Pearson p-value, and an interactive scatter plot. **Discover** screens series with at least six paired observations by default, applies Benjamini–Hochberg false-discovery-rate correction across the complete screened set, and ranks candidates using a documented combination of effect magnitude, sample size, FDR evidence, and Pearson/Spearman agreement. Selecting a discovery opens its raw observations in Explore. Discovery is exploratory: shared time trends are not yet removed, and neither raw nor adjusted statistics imply causation.
+
+The numeric-series registry is generated once per normalized workbook. It keeps units and explicitly recorded measurement protocols in series identity, marks performance direction without altering raw values, retains source row references, and excludes sparse arbitrary metadata fields. Unknown protocol remains unknown. Current nearest matching is deterministic and greedy in chronological X order: each X receives the closest unused Y within the selected window, with earlier date/reference used to break ties. This prevents inflated sample sizes from repeatedly reusing a single observation.
+
 ## GitHub Pages preparation
 
 This repository defaults to the GitHub Pages project path `/TrainingDash/`, matching `https://bobgsmith.github.io/TrainingDash/`. Override it for another deployment with `VITE_BASE_PATH=/another-path/ npm run build`.

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { NormalizedWorkbook } from '../data/normalized/types';
 import { analyseSeries, type AnalysisSummary, type PairingStrategy, type PairedObservation } from '../domain/analysis';
 import { buildAnalysisVariables, type AnalysisVariable } from '../domain/analysisVariables';
+import { DEFAULT_DISCOVERY_MIN_N, discoverRelationships, type DiscoveryResult } from '../domain/discovery';
 
 export function AnalysisPage({ data }: { data: NormalizedWorkbook }) {
   const variables = useMemo(() => buildAnalysisVariables(data), [data]);
@@ -13,17 +14,24 @@ export function AnalysisPage({ data }: { data: NormalizedWorkbook }) {
   const [strategy, setStrategy] = useState<PairingStrategy>('same-day');
   const [windowDays, setWindowDays] = useState(14);
   const [showRegression, setShowRegression] = useState(true);
+  const [mode, setMode] = useState<'explore' | 'discover'>('explore');
+  const [minimumN, setMinimumN] = useState(DEFAULT_DISCOVERY_MIN_N);
   const x = variables.find((variable) => variable.id === xId) ?? initialX;
   const y = variables.find((variable) => variable.id === yId) ?? initialY;
   const summary = useMemo(() => x && y ? analyseSeries(x.series, y.series, strategy, windowDays) : undefined, [x, y, strategy, windowDays]);
+  const discoveries = useMemo(() => discoverRelationships(variables, { strategy: 'same-day', minimumN }), [variables, minimumN]);
 
   const selectExercise = (axis: 'x' | 'y', exercise: string) => {
     const next = variables.find((variable) => variable.exercise === exercise);
     if (next) axis === 'x' ? setXId(next.id) : setYId(next.id);
   };
 
+  const inspectDiscovery = (result: DiscoveryResult) => { setXId(result.xSeriesId); setYId(result.ySeriesId); setStrategy(result.pairingStrategy); setWindowDays(result.pairingWindowDays); setMode('explore'); };
+
   return <>
     <header className="page-header"><p className="eyebrow">Exploratory</p><h1>Analysis</h1><p>Explore associations between recorded variables. Pairing is explicit, raw points remain visible, and correlation does not establish causation.</p></header>
+    <div className="analysis-tabs" role="tablist"><button role="tab" aria-selected={mode === 'explore'} className={mode === 'explore' ? 'active' : ''} onClick={() => setMode('explore')}>Explore</button><button role="tab" aria-selected={mode === 'discover'} className={mode === 'discover' ? 'active' : ''} onClick={() => setMode('discover')}>Discover</button></div>
+    {mode === 'discover' ? <DiscoverView discoveries={discoveries} minimumN={minimumN} onMinimumN={setMinimumN} onInspect={inspectDiscovery} /> : <>
     <section className="analysis-builder">
       <AxisSelector axis="X" variable={x} variables={variables} exercises={exercises} onExercise={(value) => selectExercise('x', value)} onVariable={setXId} />
       <div className="axis-link" aria-hidden="true">×</div>
@@ -36,6 +44,14 @@ export function AnalysisPage({ data }: { data: NormalizedWorkbook }) {
       <p>{strategy === 'same-day' ? 'Observations are paired only when their dates match.' : `Each X observation is paired to the nearest unused Y observation within ${windowDays} days.`}</p>
     </section>
     {x && y && summary && <AnalysisResults x={x} y={y} summary={summary} showRegression={showRegression} />}
+    </>}
+  </>;
+}
+
+function DiscoverView({ discoveries, minimumN, onMinimumN, onInspect }: { discoveries: DiscoveryResult[]; minimumN: number; onMinimumN(value: number): void; onInspect(result: DiscoveryResult): void }) {
+  return <><section className="panel discovery-intro"><div><p className="eyebrow">Exploratory screening</p><h2>Relationships worth exploring</h2><p>Eligible series are paired on the same day, screened cheaply, and corrected together for multiple testing. Rankings prioritise effect size, sample size, FDR evidence, and agreement between Pearson and Spearman.</p></div><label className="select-label"><span>Minimum paired n</span><select value={minimumN} onChange={(event) => onMinimumN(Number(event.target.value))}>{[6, 8, 10, 12].map((value) => <option key={value}>{value}</option>)}</select></label></section>
+    <div className="notice analysis-warning"><strong>Exploratory, not causal</strong><span>Shared trends over time and repeated training cycles can create associations. Raw points should be inspected before interpreting a result.</span></div>
+    {discoveries.length ? <section className="discovery-list">{discoveries.slice(0, 30).map((result) => <button className="discovery-row" key={`${result.xSeriesId}:${result.ySeriesId}`} onClick={() => onInspect(result)}><div><strong>{result.xLabel}</strong><span>↔</span><strong>{result.yLabel}</strong></div><dl><div><dt>r</dt><dd>{result.pearsonR.toFixed(3)}</dd></div><div><dt>ρ</dt><dd>{result.spearmanRho.toFixed(3)}</dd></div><div><dt>n</dt><dd>{result.n}</dd></div><div><dt>p</dt><dd>{formatProbability(result.rawP)}</dd></div><div><dt>FDR q</dt><dd>{formatProbability(result.qValue)}</dd></div></dl><small>Inspect raw observations →</small></button>)}</section> : <div className="empty-state">No relationships have at least {minimumN} valid same-day pairs. This is a valid result—not enough data is preferable to a misleading correlation.</div>}
   </>;
 }
 
@@ -46,7 +62,7 @@ function AxisSelector({ axis, variable, variables, exercises, onExercise, onVari
 
 function AnalysisResults({ x, y, summary, showRegression }: { x: AnalysisVariable; y: AnalysisVariable; summary: AnalysisSummary; showRegression: boolean }) {
   return <>
-    <section className="analysis-stats"><Stat label="Paired observations" value={String(summary.n)} emphasize={summary.n < 5} /><Stat label="Pearson r" value={formatStatistic(summary.pearsonR)} /><Stat label="Spearman ρ" value={formatStatistic(summary.spearmanRho)} /></section>
+    <section className="analysis-stats"><Stat label="Paired observations" value={String(summary.n)} emphasize={summary.n < 5} /><Stat label="Pearson r" value={formatStatistic(summary.pearsonR)} /><Stat label="Spearman ρ" value={formatStatistic(summary.spearmanRho)} /><Stat label="Pearson p" value={summary.pearsonP == null ? '—' : formatProbability(summary.pearsonP)} /></section>
     {summary.n < 5 && <div className="notice analysis-warning"><strong>Small sample</strong><span>Only {summary.n} paired observation{summary.n === 1 ? '' : 's'}. Treat any apparent relationship as highly uncertain.</span></div>}
     <section className="panel"><div className="section-heading"><div><p className="eyebrow">Recorded relationship</p><h2>{x.exercise}: {x.label} vs {y.exercise}: {y.label}</h2></div></div><ScatterPlot pairs={summary.pairs} x={x} y={y} regression={showRegression ? summary.regression : undefined} /></section>
     {summary.pairs.length > 0 && <section className="panel"><h2>Paired observations</h2><div className="table-scroll"><table><thead><tr><th>X value</th><th>X date</th><th>Y value</th><th>Y date</th><th>Date difference</th></tr></thead><tbody>{summary.pairs.map((pair) => <tr key={`${pair.x.id}:${pair.y.id}`}><td>{pair.x.value} {x.unit}</td><td>{pair.x.date}</td><td>{pair.y.value} {y.unit}</td><td>{pair.y.date}</td><td>{formatDayDifference(pair.dayDifference)}</td></tr>)}</tbody></table></div></section>}
@@ -55,6 +71,7 @@ function AnalysisResults({ x, y, summary, showRegression }: { x: AnalysisVariabl
 
 function Stat({ label, value, emphasize }: { label: string; value: string; emphasize?: boolean }) { return <div className={emphasize ? 'stat caution' : 'stat'}><span>{label}</span><strong>{value}</strong></div>; }
 function formatStatistic(value: number | undefined) { return value == null ? '—' : value.toFixed(3); }
+function formatProbability(value: number) { return value < .001 ? '<0.001' : value.toFixed(3); }
 function formatDayDifference(days: number) { return days === 0 ? 'Same day' : `${days > 0 ? '+' : ''}${days} day${Math.abs(days) === 1 ? '' : 's'}`; }
 
 function ScatterPlot({ pairs, x, y, regression }: { pairs: PairedObservation[]; x: AnalysisVariable; y: AnalysisVariable; regression?: { slope: number; intercept: number } }) {
