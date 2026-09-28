@@ -103,7 +103,8 @@ export async function fetchWorkbook(
     const query = new URLSearchParams({
       majorDimension: 'ROWS',
       valueRenderOption: 'UNFORMATTED_VALUE',
-      dateTimeRenderOption: 'FORMATTED_STRING',
+      // Serial dates are locale-independent; the normaliser converts them to ISO dates.
+      dateTimeRenderOption: 'SERIAL_NUMBER',
     });
     const response = await fetch(
       `${SHEETS_API}/${encodeURIComponent(athlete.spreadsheetId)}/values/${encodeURIComponent(a1Range)}?${query}`,

@@ -21,6 +21,8 @@ describe('primitive parsers', () => {
 
   it('parses supported dates without silently accepting impossible dates', () => {
     expect(parseDate('26/09/2026')).toBe('2026-09-26');
+    expect(parseDate('9/25/2026')).toBe('2026-09-25');
+    expect(parseDate('46290')).toBe('2026-09-25');
     expect(parseDate('2026-09-26')).toBe('2026-09-26');
     expect(parseDate('31/02/2026')).toBeUndefined();
   });

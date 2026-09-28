@@ -22,12 +22,12 @@ export function optionalInteger(value: unknown): number | undefined {
 
 export function parseDate(value: unknown): string | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const milliseconds = Date.UTC(1899, 11, 30) + value * 86_400_000;
-    const serialDate = new Date(milliseconds);
-    return formatDate(serialDate.getUTCFullYear(), serialDate.getUTCMonth() + 1, serialDate.getUTCDate());
+    return parseGoogleDateSerial(value);
   }
   const text = optionalText(value);
   if (!text) return undefined;
+
+  if (/^\d{5}(?:\.\d+)?$/.test(text)) return parseGoogleDateSerial(Number(text));
 
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(text);
   if (iso) return formatDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
@@ -36,12 +36,24 @@ export function parseDate(value: unknown): string | undefined {
   if (dayFirst) {
     const yearValue = Number(dayFirst[3]);
     const year = yearValue < 100 ? 2000 + yearValue : yearValue;
-    return formatDate(year, Number(dayFirst[2]), Number(dayFirst[1]));
+    const first = Number(dayFirst[1]);
+    const second = Number(dayFirst[2]);
+    // Infer only when the date is unambiguous. Preserve the existing day-first
+    // convention for ambiguous legacy text; API dates arrive as serial values.
+    const month = second > 12 ? first : second;
+    const day = second > 12 ? second : first;
+    return formatDate(year, month, day);
   }
 
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return undefined;
   return formatDate(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
+}
+
+function parseGoogleDateSerial(value: number): string | undefined {
+  const milliseconds = Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000;
+  const serialDate = new Date(milliseconds);
+  return formatDate(serialDate.getUTCFullYear(), serialDate.getUTCMonth() + 1, serialDate.getUTCDate());
 }
 
 function formatDate(year: number, month: number, day: number): string | undefined {
