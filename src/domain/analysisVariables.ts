@@ -1,5 +1,6 @@
 import type { NormalizedWorkbook, TrainingSession } from '../data/normalized/types';
 import type { SeriesObservation } from './analysis';
+import { estimate1RM, isBodyweightAugmentedExercise, MAX_E1RM_REPS } from './strength';
 
 export interface NumericSeries {
   id: string;
@@ -19,10 +20,11 @@ export interface NumericSeries {
   derivedFrom: string[];
   sourceObservationIds: string[];
   conceptId: string;
-  metadata: { category: 'Sprint' | 'Jump' | 'Strength' | 'Recovery' | 'Training'; protocol?: string; amountUnit?: string; intensityUnit?: string; exerciseConcept: string };
+  metadata: { category: 'Sprint' | 'Jump' | 'Strength' | 'Recovery' | 'Training' | 'Body'; protocol?: string; amountUnit?: string; intensityUnit?: string; exerciseConcept: string; athleticQuality?: AthleticQuality; structuralVariable?: boolean; timepoint?: string };
 }
 export type AnalysisVariable = NumericSeries;
-export type MetricFamily = 'PERFORMANCE' | 'EFFORT' | 'SYMPTOM' | 'VOLUME' | 'RECOVERY' | 'BODY_METRIC' | 'CONTEXT';
+export type MetricFamily = 'PERFORMANCE' | 'TRAINING_LOAD' | 'EFFORT' | 'SYMPTOM' | 'RECOVERY' | 'BODY_METRIC' | 'CONTEXT';
+export type AthleticQuality = 'STRENGTH' | 'POWER' | 'ACCELERATION' | 'MAX_VELOCITY' | 'ENDURANCE' | 'JUMP' | 'GENERAL';
 
 function context(row: TrainingSession): string {
   return [row.category, row.surface, row.footwear, row.leadInMetres != null ? `${row.leadInMetres}m lead-in` : undefined, row.rawExtra, row.symptoms, row.notes].filter(Boolean).join(' · ');
@@ -36,6 +38,13 @@ function point(row: TrainingSession, value: number, label: string, unit?: string
 function legacyNumber(text: string | undefined, pattern: RegExp): number | undefined {
   const match = text ? pattern.exec(text) : undefined;
   const value = match ? Number(match[1]) : NaN;
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function symptomScore(text: string | undefined): number | undefined {
+  if (!text) return undefined;
+  const match = /(?:pain[^0-9]{0,24}([0-9]+(?:\.[0-9]+)?)(?:\s*\/\s*10)?|([0-9]+(?:\.[0-9]+)?)\s*\/\s*10)/i.exec(text);
+  const value = Number(match?.[1] ?? match?.[2]);
   return Number.isFinite(value) ? value : undefined;
 }
 
@@ -67,7 +76,7 @@ function familyForExtra(key: string): MetricFamily {
   if (/pain|symptom|soreness|ache/.test(value)) return 'SYMPTOM';
   if (/rpe|effort|exertion/.test(value)) return 'EFFORT';
   if (/body.?weight|body.?mass/.test(value)) return 'BODY_METRIC';
-  if (/volume|tonnage|distance|duration|reps|sets/.test(value)) return 'VOLUME';
+  if (/volume|tonnage|distance|duration|reps|sets/.test(value)) return 'TRAINING_LOAD';
   if (/sleep|hrv|resting|readiness|fatigue|recovery/.test(value)) return 'RECOVERY';
   if (/velocity|speed|height|time|load|power|force/.test(value)) return 'PERFORMANCE';
   return 'CONTEXT';
@@ -78,12 +87,22 @@ function intensityFamily(unit: string | undefined): MetricFamily {
   return normalized === '%' || normalized === 'rpe' ? 'EFFORT' : 'PERFORMANCE';
 }
 
-function variable(exercise: string, metric: string, label: string, unit: string | undefined, direction: NumericSeries['direction'], series: Array<SeriesObservation | undefined>, rows: readonly TrainingSession[], metricFamily: MetricFamily, derived = false, discoveryEligible = true, protocol?: string, derivedFrom: string[] = []): NumericSeries | undefined {
+function athleticQuality(rows: readonly TrainingSession[]): AthleticQuality {
+  const category = rows[0]?.category?.toLowerCase() ?? '';
+  if (rows[0]?.amountUnit?.toLowerCase() === 'reps' && rows[0]?.intensityUnit?.toLowerCase() === 'kg') return 'STRENGTH';
+  if (category === 'acceleration') return 'ACCELERATION';
+  if (category === 'max velocity') return 'MAX_VELOCITY';
+  if (category === 'speed endurance') return 'ENDURANCE';
+  if (category === 'plyometric' || category === 'testing') return 'JUMP';
+  return 'GENERAL';
+}
+
+function variable(exercise: string, metric: string, label: string, unit: string | undefined, direction: NumericSeries['direction'], series: Array<SeriesObservation | undefined>, rows: readonly TrainingSession[], metricFamily: MetricFamily, derived = false, discoveryEligible = true, protocol?: string, derivedFrom: string[] = [], structuralVariable = false): NumericSeries | undefined {
   const valid = series.filter((item): item is SeriesObservation => Boolean(item));
   if (!valid.length) return undefined;
   const id = seriesId(exercise, metric, unit, protocol);
   const exerciseConcept = rows[0]?.exercise ?? exercise;
-  return { id, exercise, metric, variable: metric, label, source: 'Full Session tracking', unit, direction, higherIsBetter: direction === 'neutral' ? undefined : direction === 'higher', observations: valid, series: valid, derived, discoveryEligible, metricFamily, derivedFrom, sourceObservationIds: valid.map((item) => item.sourceReference ? `${item.sourceReference.tab}:${item.sourceReference.rowNumber}` : item.id), conceptId: `${exerciseConcept}::${metricFamily}`, metadata: { category: categoryFor(rows), protocol, amountUnit: rows[0]?.amountUnit, intensityUnit: rows[0]?.intensityUnit, exerciseConcept } };
+  return { id, exercise, metric, variable: metric, label, source: 'Full Session tracking', unit, direction, higherIsBetter: direction === 'neutral' ? undefined : direction === 'higher', observations: valid, series: valid, derived, discoveryEligible, metricFamily, derivedFrom, sourceObservationIds: valid.map((item) => item.sourceReference ? `${item.sourceReference.tab}:${item.sourceReference.rowNumber}` : item.id), conceptId: `${exerciseConcept}::${metricFamily}`, metadata: { category: categoryFor(rows), protocol, amountUnit: rows[0]?.amountUnit, intensityUnit: rows[0]?.intensityUnit, exerciseConcept, athleticQuality: athleticQuality(rows), structuralVariable } };
 }
 
 function intensityDirection(rows: readonly TrainingSession[]): 'higher' | 'lower' {
@@ -125,10 +144,14 @@ export function buildAnalysisVariables(data: NormalizedWorkbook): AnalysisVariab
     const amountId = seriesId(exercise, 'amount', amountUnit, protocol);
     const intensityId = seriesId(exercise, 'intensity', intensityUnit, protocol);
     const candidates: Array<AnalysisVariable | undefined> = [
-      variable(exercise, 'amount', 'Amount', amountUnit, 'neutral', rows.map((row) => row.amount == null ? undefined : point(row, row.amount, 'Amount', row.amountUnit)), rows, 'VOLUME', false, true, protocol),
-      variable(exercise, 'intensity', 'Intensity', intensityUnit, direction, rows.map((row) => row.intensity == null ? undefined : point(row, row.intensity, 'Intensity', row.intensityUnit, direction)), rows, intensityFamily(intensityUnit), false, true, protocol),
-      variable(exercise, 'sets', 'Sets', 'sets', 'neutral', rows.map((row) => row.sets == null ? undefined : point(row, row.sets, 'Sets', 'sets')), rows, 'VOLUME', false, true, protocol),
+      variable(exercise, 'amount', 'Amount', amountUnit, 'neutral', rows.map((row) => row.amount == null ? undefined : point(row, row.amount, 'Amount', row.amountUnit)), rows, 'TRAINING_LOAD', false, true, protocol, [], true),
+      variable(exercise, 'intensity', 'Intensity', intensityUnit, direction, rows.map((row) => row.intensity == null ? undefined : point(row, row.intensity, 'Intensity', row.intensityUnit, direction)), rows, intensityFamily(intensityUnit), false, true, protocol, [], athleticQuality(rows) === 'STRENGTH'),
+      variable(exercise, 'sets', 'Sets', 'sets', 'neutral', rows.map((row) => row.sets == null ? undefined : point(row, row.sets, 'Sets', 'sets')), rows, 'TRAINING_LOAD', false, true, protocol, [], true),
     ];
+    const distanceExposure = rows.map((row) => row.sets == null || row.amount == null || !['m', 'yd'].includes(row.amountUnit?.toLowerCase() ?? '') ? undefined : point(row, row.sets * row.amount, 'Distance exposure', row.amountUnit));
+    candidates.push(variable(exercise, 'distance-exposure', 'Distance exposure', amountUnit, 'neutral', distanceExposure, rows, 'TRAINING_LOAD', true, true, protocol, [amountId, seriesId(exercise, 'sets', 'sets', protocol)], true));
+    const symptomPoints = rows.map((row) => { const value = symptomScore(row.symptoms); return value == null ? undefined : point(row, value, 'Recorded symptom score', '0–10'); });
+    candidates.push(variable(exercise, 'symptom-score', 'Recorded symptom score', '0–10', 'neutral', symptomPoints, rows, 'SYMPTOM', false, true, protocol));
 
     const measured = rows.filter((row) => row.intensity != null);
     if (measured.length) candidates.push(variable(exercise, 'pb', 'PB / best intensity', measured[0]?.intensityUnit, direction, pbSeries(measured, direction), rows, 'PERFORMANCE', true, false, protocol, [intensityId]));
@@ -137,8 +160,8 @@ export function buildAnalysisVariables(data: NormalizedWorkbook): AnalysisVariab
     for (const reps of [...new Set(strengthRows.map((row) => row.amount!))].sort((a, b) => a - b)) {
       candidates.push(variable(exercise, `load-${reps}-reps`, `${reps}-rep load`, 'kg', 'higher', strengthRows.filter((row) => row.amount === reps).map((row) => point(row, row.intensity!, `${reps}-rep load`, 'kg', 'higher')), rows, 'PERFORMANCE', false, true, protocol, [intensityId, amountId]));
     }
-    candidates.push(variable(exercise, 'estimated-1rm', 'Estimated 1RM (Epley)', 'kg', 'higher', strengthRows.map((row) => point(row, row.intensity! * (1 + row.amount! / 30), 'Estimated 1RM', 'kg', 'higher')), rows, 'PERFORMANCE', true, true, protocol, [intensityId, amountId]));
-    candidates.push(variable(exercise, 'session-volume', 'Session volume', 'kg·reps', 'higher', strengthRows.map((row) => row.sets == null ? undefined : point(row, row.sets * row.amount! * row.intensity!, 'Session volume', 'kg·reps', 'higher')), rows, 'VOLUME', true, true, protocol, [intensityId, amountId, seriesId(exercise, 'sets', 'sets', protocol)]));
+    if (!isBodyweightAugmentedExercise(sourceExercise)) candidates.push(variable(exercise, 'estimated-1rm', 'Estimated 1RM (Epley)', 'kg', 'higher', strengthRows.map((row) => row.amount! > MAX_E1RM_REPS ? undefined : point(row, estimate1RM(row.intensity, row.amount)!, 'Estimated 1RM', 'kg', 'higher')), rows, 'PERFORMANCE', true, true, protocol, [intensityId, amountId]));
+    candidates.push(variable(exercise, 'session-volume', 'Session volume', 'kg·reps', 'higher', strengthRows.map((row) => row.sets == null ? undefined : point(row, row.sets * row.amount! * row.intensity!, 'Session volume', 'kg·reps', 'higher')), rows, 'TRAINING_LOAD', true, true, protocol, [intensityId, amountId, seriesId(exercise, 'sets', 'sets', protocol)], true));
 
     const rpe = rows.map((row) => {
       const value = typeof row.extra?.rpe === 'number' ? row.extra.rpe : legacyNumber(row.rawExtra, /\bRPE\s*([0-9]+(?:\.[0-9]+)?)/i);
@@ -164,22 +187,41 @@ export function buildAnalysisVariables(data: NormalizedWorkbook): AnalysisVariab
     const numericKeys = [...new Set(rows.flatMap((row) => Object.entries(row.extra ?? {}).filter(([, value]) => typeof value === 'number').map(([key]) => key)))];
     for (const key of numericKeys) {
       if (['rpe', 'best_velocity_ms', 'average_velocity_ms', 'rep_velocity_ms'].includes(key)) continue;
+      if (familyForExtra(key) === 'BODY_METRIC') continue;
       const points = rows.map((row) => typeof row.extra?.[key] === 'number' ? point(row, row.extra[key] as number, key) : undefined);
       if (points.filter(Boolean).length >= 2) candidates.push(variable(exercise, `extra-${key}`, key.replaceAll('_', ' '), undefined, 'neutral', points, rows, familyForExtra(key), false, true, protocol));
     }
     result.push(...candidates.filter((item): item is AnalysisVariable => Boolean(item)));
   }
 
-  const dailyKeys = [...new Set(data.dailyStatus.flatMap((row) => Object.entries(row.extra ?? {}).filter(([, value]) => typeof value === 'number').map(([key]) => key)))];
-  for (const key of dailyKeys) {
-    const series = data.dailyStatus.flatMap((row) => {
+  const dailyGroups = new Map<string, { key: string; timepoint: string; rows: typeof data.dailyStatus }>();
+  for (const row of data.dailyStatus) for (const [key, value] of Object.entries(row.extra ?? {})) {
+    if (typeof value !== 'number' || familyForExtra(key) === 'BODY_METRIC') continue;
+    const timepoint = row.timepoint?.trim() || 'Timepoint unknown';
+    const id = `${key}::${timepoint.toLowerCase()}`;
+    const group = dailyGroups.get(id) ?? { key, timepoint, rows: [] };
+    group.rows.push(row); dailyGroups.set(id, group);
+  }
+  for (const { key, timepoint, rows } of dailyGroups.values()) {
+    const series = rows.flatMap((row) => {
       const value = row.extra?.[key];
       return typeof value === 'number' && row.date ? [{ id: `${row.tab}:${row.rowNumber}:${key}`, date: row.date, value, label: row.context ?? 'Daily Status', direction: 'neutral' as const, context: [row.timepoint, row.context, row.notes].filter(Boolean).join(' · '), sourceReference: { tab: row.tab, rowNumber: row.rowNumber }, metadata: { timepoint: row.timepoint, context: row.context, notes: row.notes, extra: row.extra } }] : [];
     });
     if (series.length >= 2) {
       const metricFamily = familyForExtra(key);
-      result.push({ id: `daily-status::${key}`, exercise: 'Daily Status', metric: key, variable: key, label: key.replaceAll('_', ' '), source: 'Daily Status', direction: 'neutral', observations: series, series, discoveryEligible: true, metricFamily, derivedFrom: [], sourceObservationIds: series.map((item) => item.sourceReference ? `${item.sourceReference.tab}:${item.sourceReference.rowNumber}` : item.id), conceptId: `Daily Status:${key}::${metricFamily}`, metadata: { category: 'Recovery', exerciseConcept: `Daily Status:${key}` } });
+      result.push({ id: `daily-status::${key}::${timepoint}`, exercise: `Daily Status — ${timepoint}`, metric: key, variable: key, label: key.replaceAll('_', ' '), source: 'Daily Status', direction: 'neutral', observations: series, series, discoveryEligible: true, metricFamily, derivedFrom: [], sourceObservationIds: series.map((item) => item.sourceReference ? `${item.sourceReference.tab}:${item.sourceReference.rowNumber}` : item.id), conceptId: `Daily Status:${key}:${timepoint}::${metricFamily}`, metadata: { category: 'Recovery', exerciseConcept: `Daily Status:${key}`, timepoint } });
     }
+  }
+
+  const bodyKeys = [...new Set([...data.training, ...data.dailyStatus].flatMap((row) => Object.keys(row.extra ?? {}).filter((key) => familyForExtra(key) === 'BODY_METRIC')))];
+  for (const key of bodyKeys) {
+    const series: SeriesObservation[] = [];
+    for (const row of [...data.training, ...data.dailyStatus]) {
+      const value = row.extra?.[key];
+      if (typeof value !== 'number' || !row.date) continue;
+      series.push({ id: `${row.tab}:${row.rowNumber}:${key}`, date: row.date, value, label: key.replaceAll('_', ' '), direction: 'neutral', sourceReference: { tab: row.tab, rowNumber: row.rowNumber }, context: 'Dated body metric', metadata: { extra: row.extra } });
+    }
+    if (series.length >= 2) result.push({ id: `body-metric::${key}`, exercise: 'Body metrics', metric: key, variable: key, label: key.replaceAll('_', ' '), source: series[0]?.sourceReference?.tab === 'Daily Status' ? 'Daily Status' : 'Full Session tracking', unit: /kg|weight|mass/i.test(key) ? 'kg' : undefined, direction: 'neutral', observations: series, series, discoveryEligible: true, metricFamily: 'BODY_METRIC', derivedFrom: [], sourceObservationIds: series.map((item) => `${item.sourceReference!.tab}:${item.sourceReference!.rowNumber}`), conceptId: `Body:${key}`, metadata: { category: 'Body', exerciseConcept: `Body:${key}` } });
   }
   return result;
 }

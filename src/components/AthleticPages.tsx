@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { NormalizedWorkbook, SprintPerformance } from '../data/normalized/types';
-import { jumpPBs, liftingPBFrontier, sprintPBs } from '../domain/pb';
+import { jumpPBs, sprintPBs } from '../domain/pb';
 import { buildPerformanceCurve, compatibleCurveExercises } from '../domain/performanceCurve';
-import { PerformanceCurve, ProgressChart, type ChartDatum } from './Charts';
+import { PerformanceCurve, ProgressChart, StrengthEstimateChart, type ChartDatum } from './Charts';
 import { filterSprintPerformances } from '../domain/sprint';
+import { bestActualPerformance, DEFAULT_STRENGTH_WINDOW_DAYS, estimatedOneRepMaxObservations, estimateCurrentStrength, isBodyweightAugmentedExercise, repSpecificProgression, strengthSetObservations, strengthStateProgression, weeklyStrengthExposure } from '../domain/strength';
 
 function PageHeader({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) {
   return <header className="page-header"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></header>;
@@ -44,16 +45,38 @@ export function JumpPage({ data }: { data: NormalizedWorkbook }) {
 }
 
 export function StrengthPage({ data }: { data: NormalizedWorkbook }) {
-  const exercises = compatibleCurveExercises(data.training).filter((exercise) => data.strength.some((row) => row.exercise === exercise));
+  const allStrength = useMemo(() => strengthSetObservations(data.training), [data.training]);
+  const exercises = compatibleCurveExercises(data.training).filter((exercise) => allStrength.some((row) => row.exercise === exercise));
   const [exercise, setExercise] = useState(exercises[0] ?? '');
+  const [windowDays, setWindowDays] = useState(DEFAULT_STRENGTH_WINDOW_DAYS);
+  const [repSelection, setRepSelection] = useState(5);
+  const observations = allStrength.filter((row) => row.exercise === exercise);
+  const e1rm = estimatedOneRepMaxObservations(observations);
+  const state = strengthStateProgression(e1rm, { windowDays });
+  const latestDate = observations.map((item) => item.date).sort().at(-1);
+  const current = latestDate ? estimateCurrentStrength(e1rm, latestDate, { windowDays }) : undefined;
+  const contributing = new Set(current?.contributingObservationIds ?? []);
+  const bestRecent = e1rm.filter((item) => contributing.has(item.id)).sort((a, b) => b.e1rmKg - a.e1rmKg)[0];
+  const actual = bestActualPerformance(observations);
+  const priorDate = latestDate ? new Date(Date.parse(`${latestDate}T00:00:00Z`) - 90 * 86_400_000).toISOString().slice(0, 10) : undefined;
+  const prior = priorDate ? estimateCurrentStrength(e1rm, priorDate, { windowDays }) : undefined;
+  const change = current && prior ? current.estimatedStrengthKg - prior.estimatedStrengthKg : undefined;
+  const repCounts = [...new Set(observations.map((item) => item.reps))].sort((a, b) => a - b);
+  const selectedReps = repCounts.includes(repSelection) ? repSelection : repCounts[0];
+  const repProgression = selectedReps == null ? [] : repSpecificProgression(observations, selectedReps);
+  const exposure = weeklyStrengthExposure(observations).slice(-8).reverse();
   const curve = useMemo(() => buildPerformanceCurve(data.training, exercise), [data.training, exercise]);
-  const frontier = liftingPBFrontier(data.strength.filter((row) => row.exercise === exercise));
-  return <><PageHeader eyebrow="Capacity" title="Strength" copy="Actual demonstrated load–repetition capacity, separate from estimates." />
+  return <><PageHeader eyebrow="Capacity" title="Strength" copy="Modelled current strength, actual rep-specific progress, and demonstrated load–repetition capacity." />
     <section className="panel controls"><label>Exercise<select value={exercise} onChange={(e) => setExercise(e.target.value)}>{exercises.map((value) => <option key={value}>{value}</option>)}</select></label></section>
-    <section className="panel"><div className="section-heading"><div><p className="eyebrow">Performance curve</p><h2>{exercise}</h2></div></div>{curve ? <PerformanceCurve curve={curve} /> : <div className="empty-state">No compatible reps × kg observations.</div>}</section>
-    <section className="panel"><h2>Current demonstrated frontier</h2><div className="frontier-cards">{frontier.map((point) => <div key={point.rowNumber}><strong>{point.loadKg} kg</strong><span>× {point.reps} reps</span><small>{point.date ?? 'Date unknown'}{point.rpe != null ? ` · RPE ${point.rpe}` : ''}</small></div>)}</div></section>
+    <section className="dashboard-section"><div className="section-heading"><div><p className="eyebrow">Current strength summary</p><h2>{exercise}</h2></div></div>{isBodyweightAugmentedExercise(exercise) ? <div className="notice analysis-warning"><strong>e1RM unsupported</strong><span>This exercise requires historical bodyweight plus external load. Its actual observations remain available without a misleading external-load-only estimate.</span></div> : <div className="strength-summary">{current && <SummaryMetric label="Estimated current 1RM" value={`~${current.estimatedStrengthKg.toFixed(1)} kg`} detail={`${windowDays}-day upper-performance model`} estimated />}{bestRecent && <SummaryMetric label="Best recent estimate" value={`${bestRecent.e1rmKg.toFixed(1)} kg`} detail={`${bestRecent.loadKg} kg × ${bestRecent.reps} · ${bestRecent.date}`} estimated />}{actual && <SummaryMetric label="Best actual performance" value={`${actual.loadKg} kg × ${actual.reps}`} detail={actual.date} />}{change != null && <SummaryMetric label="90-day model change" value={`${change >= 0 ? '+' : ''}${change.toFixed(1)} kg`} detail={`${change >= 0 ? '+' : ''}${(change / prior!.estimatedStrengthKg * 100).toFixed(1)}%`} estimated />}</div>}</section>
+    <section className="panel"><div className="section-heading"><div><p className="eyebrow">Estimated 1RM over time</p><h2>Raw estimates vs current strength</h2></div><label className="select-label"><span>Rolling window</span><select value={windowDays} onChange={(event) => setWindowDays(Number(event.target.value))}>{[30, 45, 60, 90].map((days) => <option value={days} key={days}>{days} days</option>)}</select></label></div><StrengthEstimateChart observations={e1rm} state={state} /><p className="muted">Epley estimates use positive 1–12 rep performances. The model line is the mean of up to the two best estimates in the selected recent window; it is not a formal confidence interval.</p></section>
+    <section className="panel"><div className="section-heading"><div><p className="eyebrow">Load–rep performance curve</p><h2>Demonstrated capacity</h2></div></div>{curve ? <PerformanceCurve curve={curve} /> : <div className="empty-state">No compatible reps × kg observations.</div>}<h2>Current demonstrated frontier</h2><div className="frontier-cards">{curve?.frontier.map((point) => <div key={point.observation.rowNumber}><strong>{point.intensity} kg</strong><span>× {point.amount} reps</span><small>{point.observation.date ?? 'Date unknown'}{point.observation.rawExtra ? ` · ${point.observation.rawExtra}` : ''}</small></div>)}</div></section>
+    <section className="panel"><div className="section-heading"><div><p className="eyebrow">Rep-specific progression</p><h2>Actual demonstrated load</h2></div>{selectedReps != null && <label className="select-label"><span>Rep count</span><select value={selectedReps} onChange={(event) => setRepSelection(Number(event.target.value))}>{repCounts.map((reps) => <option value={reps} key={reps}>{reps} reps</option>)}</select></label>}</div><ProgressChart unit="kg" data={repProgression.map((item) => ({ id: item.id, date: item.date, value: item.loadKg, label: `${item.loadKg} kg × ${item.reps}`, detail: [item.rpe != null ? `RPE ${item.rpe}` : 'RPE unknown', item.session, item.rawExtra, item.symptoms, item.notes].filter(Boolean).join(' · ') }))} /><p className="muted">Only new recorded load bests at exactly {selectedReps ?? 'the selected'} reps are connected. No rep counts are converted or interpolated.</p></section>
+    <section className="panel"><div className="section-heading"><div><p className="eyebrow">Training exposure</p><h2>Recent weekly work</h2></div></div>{exposure.length ? <div className="table-scroll exposure-table"><table><thead><tr><th>Week starting</th><th>Sessions</th><th>Known work sets</th><th>Known reps</th><th>Tonnage</th></tr></thead><tbody>{exposure.map((week) => <tr key={week.weekStart}><td>{week.weekStart}</td><td>{week.sessions}</td><td>{week.workSets ?? 'Unknown'}</td><td>{week.totalReps ?? 'Unknown'}</td><td>{week.tonnageKg != null ? `${week.tonnageKg.toLocaleString()} kg` : 'Unknown'}</td></tr>)}</tbody></table></div> : <div className="empty-state">No exposure data for this exercise.</div>}<p className="muted">Tonnage is shown only for conventional reps × kg rows with recorded sets. It describes exposure, not training effect.</p></section>
   </>;
 }
+
+function SummaryMetric({ label, value, detail, estimated = false }: { label: string; value: string; detail: string; estimated?: boolean }) { return <div className={estimated ? 'strength-metric estimated' : 'strength-metric'}><span>{label}</span><strong>{value}</strong><small>{estimated ? 'Modelled · ' : 'Recorded · '}{detail}</small></div>; }
 
 export function TrainingPage({ data }: { data: NormalizedWorkbook }) {
   const dates = [...new Set(data.training.map((row) => row.date).filter(Boolean))].sort().reverse();

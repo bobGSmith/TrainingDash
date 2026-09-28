@@ -1,4 +1,5 @@
 import type { TrainingSession } from '../data/normalized/types';
+import { normaliseExerciseName } from '../data/normalized/aliases';
 
 export type CurveDirection = 'higher' | 'lower';
 export type CurveKind = 'strength-frontier' | 'best-by-amount';
@@ -24,7 +25,7 @@ export interface PerformanceCurveData {
 export function performanceCurveCompatibility(row: TrainingSession): { direction: CurveDirection; kind: CurveKind } | undefined {
   const amountUnit = row.amountUnit?.toLowerCase();
   const intensityUnit = row.intensityUnit?.toLowerCase();
-  if (row.category?.toLowerCase() === 'strength' && amountUnit === 'reps' && intensityUnit === 'kg') {
+  if (amountUnit === 'reps' && intensityUnit === 'kg' && row.intensity != null && row.intensity > 0) {
     return { direction: 'higher', kind: 'strength-frontier' };
   }
   if (['acceleration', 'max velocity', 'speed endurance'].includes(row.category?.toLowerCase() ?? '') && ['m', 'yd'].includes(amountUnit ?? '') && intensityUnit === 's') {
@@ -39,7 +40,7 @@ function canonicalAmount(row: TrainingSession): number | undefined {
 }
 
 export function buildPerformanceCurve(rows: readonly TrainingSession[], exercise: string): PerformanceCurveData | undefined {
-  const compatible = rows.filter((row) => row.exercise === exercise && row.amount != null && row.intensity != null && performanceCurveCompatibility(row));
+  const compatible = rows.filter((row) => row.exercise && normaliseExerciseName(row.exercise) === exercise && row.amount != null && row.intensity != null && performanceCurveCompatibility(row));
   const first = compatible[0];
   if (!first || !first.amountUnit || !first.intensityUnit) return undefined;
   const rule = performanceCurveCompatibility(first)!;
@@ -55,6 +56,5 @@ export function buildPerformanceCurve(rows: readonly TrainingSession[], exercise
 }
 
 export function compatibleCurveExercises(rows: readonly TrainingSession[]): string[] {
-  return [...new Set(rows.filter((row) => row.exercise && performanceCurveCompatibility(row)).map((row) => row.exercise!))].sort();
+  return [...new Set(rows.filter((row) => row.exercise && performanceCurveCompatibility(row)).map((row) => normaliseExerciseName(row.exercise!)))].sort();
 }
-

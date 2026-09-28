@@ -29,8 +29,19 @@ describe('numeric series registry', () => {
       base({ rowNumber: 3, date: '2026-01-02' }),
       base({ rowNumber: 4, date: '2026-01-03', extra: { bodyweight_kg: 81 } }),
     ]));
-    const bodyweight = registry.find((item) => item.metric === 'extra-bodyweight_kg');
+    const bodyweight = registry.find((item) => item.id === 'body-metric::bodyweight_kg');
     expect(bodyweight?.observations.map((item) => item.value)).toEqual([80, 81]);
     expect(bodyweight?.observations).toHaveLength(2);
+  });
+
+  it('preserves Daily Status morning semantics and creates longitudinal body metrics', () => {
+    const data = workbook([base({ rowNumber: 2, date: '2026-01-01', extra: { bodyweight_kg: 80 } }), base({ rowNumber: 3, date: '2026-01-10', extra: { bodyweight_kg: 81 } })]);
+    data.dailyStatus = [
+      { kind: 'daily-status', tab: 'Daily Status', rowNumber: 2, date: '2026-01-02', timepoint: 'Morning', extra: { tendon_pain: 2 } },
+      { kind: 'daily-status', tab: 'Daily Status', rowNumber: 3, date: '2026-01-03', timepoint: 'Morning', extra: { tendon_pain: 3 } },
+    ];
+    const registry = buildAnalysisVariables(data);
+    expect(registry.find((item) => item.id === 'daily-status::tendon_pain::Morning')?.metadata.timepoint).toBe('Morning');
+    expect(registry.find((item) => item.id === 'body-metric::bodyweight_kg')?.observations.map((item) => item.value)).toEqual([80, 81]);
   });
 });

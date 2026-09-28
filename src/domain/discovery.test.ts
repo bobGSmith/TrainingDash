@@ -8,7 +8,7 @@ function series(id: string, values: number[], dayOffset = 0): NumericSeries {
   return { id, exercise: id, metric: 'value', variable: 'value', label: 'Value', source: 'Full Session tracking', direction: 'neutral', observations, series: observations, discoveryEligible: true, metricFamily: 'PERFORMANCE', derivedFrom: [], sourceObservationIds: observations.map((item) => item.id), conceptId: `${id}:PERFORMANCE`, metadata: { category: 'Training', exerciseConcept: id } };
 }
 
-function semanticSeries(id: string, exercise: string, metricFamily: NumericSeries['metricFamily'], options: { derivedFrom?: string[]; sourceIds?: string[]; protocol?: string } = {}): NumericSeries {
+function semanticSeries(id: string, exercise: string, metricFamily: NumericSeries['metricFamily'], options: { derivedFrom?: string[]; sourceIds?: string[]; protocol?: string; structural?: boolean; quality?: NumericSeries['metadata']['athleticQuality'] } = {}): NumericSeries {
   const result = series(id, [1, 2, 3, 4, 5, 6]);
   result.exercise = exercise;
   result.metricFamily = metricFamily;
@@ -16,6 +16,8 @@ function semanticSeries(id: string, exercise: string, metricFamily: NumericSerie
   result.sourceObservationIds = options.sourceIds ?? result.sourceObservationIds;
   result.metadata.exerciseConcept = exercise;
   result.metadata.protocol = options.protocol;
+  result.metadata.structuralVariable = options.structural;
+  result.metadata.athleticQuality = options.quality;
   result.conceptId = `${exercise}:${metricFamily}`;
   return result;
 }
@@ -33,7 +35,7 @@ describe('discovery screening', () => {
   });
 
   it('requires usable paired dates, not just enough observations in each series', () => {
-    expect(discoverRelationships([series('x', [1, 2, 3, 4, 5, 6]), series('y', [2, 4, 6, 8, 10, 12], 10)], { minimumN: 6 })).toEqual([]);
+    expect(discoverRelationships([series('x', [1, 2, 3, 4, 5, 6]), series('y', [2, 4, 6, 8, 10, 12], 10)], { minimumN: 6, strategy: 'same-day' })).toEqual([]);
   });
 
   it('ranks supported, agreeing effects above tiny or disagreeing evidence', () => {
@@ -49,7 +51,7 @@ describe('discovery screening', () => {
     const eightRep = semanticSeries('bss-8rm', 'Bulgarian split squat', 'PERFORMANCE', { derivedFrom: [intensity.id] });
     const e1rm = semanticSeries('bss-e1rm', 'Bulgarian split squat', 'PERFORMANCE', { derivedFrom: [intensity.id, 'bss-reps'] });
     expect(evaluateDiscoveryEligibility(intensity, e1rm).reason).toBe('DIRECT_DERIVATION');
-    expect(evaluateDiscoveryEligibility(eightRep, e1rm).reason).toBe('SAME_EXERCISE_PERFORMANCE_REDUNDANCY');
+    expect(evaluateDiscoveryEligibility(eightRep, e1rm).reason).toBe('SAME_CONCEPT_REDUNDANCY');
   });
 
   it('excludes back-squat performance variants while allowing cross-exercise performance', () => {
@@ -67,7 +69,7 @@ describe('discovery screening', () => {
   it('allows useful same-exercise and symptom relationships across semantic families', () => {
     const performance = semanticSeries('squat-performance', 'Back squat', 'PERFORMANCE');
     const rpe = semanticSeries('squat-rpe', 'Back squat', 'EFFORT', { sourceIds: performance.sourceObservationIds });
-    const sprintVolume = semanticSeries('sprint-volume', 'Sprint exposure', 'VOLUME');
+    const sprintVolume = semanticSeries('sprint-volume', 'Sprint exposure', 'TRAINING_LOAD');
     const achillesPain = semanticSeries('achilles', 'Achilles morning pain', 'SYMPTOM');
     expect(evaluateDiscoveryEligibility(performance, rpe).eligible).toBe(true);
     expect(evaluateDiscoveryEligibility(sprintVolume, achillesPain).eligible).toBe(true);
@@ -82,8 +84,8 @@ describe('discovery screening', () => {
 
   it('identifies same-observation leakage only within the same semantic family', () => {
     const sourceIds = ['a', 'b', 'c', 'd', 'e', 'f'];
-    const volumeA = semanticSeries('volume-a', 'Exercise A', 'VOLUME', { sourceIds });
-    const volumeB = semanticSeries('volume-b', 'Exercise B', 'VOLUME', { sourceIds });
+    const volumeA = semanticSeries('performance-a', 'Exercise A', 'PERFORMANCE', { sourceIds });
+    const volumeB = semanticSeries('performance-b', 'Exercise B', 'PERFORMANCE', { sourceIds });
     volumeB.observations = volumeB.observations.map((item) => ({ ...item, value: item.value * 2 }));
     volumeB.series = volumeB.observations;
     expect(evaluateDiscoveryEligibility(volumeA, volumeB).reason).toBe('SAME_OBSERVATION_LEAKAGE');
@@ -97,5 +99,38 @@ describe('discovery screening', () => {
     expect(report.allResults).toHaveLength(2);
     expect(report.results).toHaveLength(1);
     expect(report.results[0]?.relatedAnalysisCount).toBe(2);
+  });
+
+  it('excludes same-exercise structural coupling and cross-exercise programming structure', () => {
+    const amount = semanticSeries('squat-amount', 'Back squat', 'TRAINING_LOAD', { structural: true });
+    const intensity = semanticSeries('squat-intensity', 'Back squat', 'PERFORMANCE', { structural: true, quality: 'STRENGTH' });
+    const cleanPullSets = semanticSeries('pull-sets', 'Clean pull', 'TRAINING_LOAD', { structural: true });
+    const frontSquatSets = semanticSeries('front-sets', 'Front squat', 'TRAINING_LOAD', { structural: true });
+    const bssLoad = semanticSeries('bss-8rm', 'Bulgarian split squat', 'PERFORMANCE', { quality: 'STRENGTH' });
+    const bssVolume = semanticSeries('bss-volume', 'Bulgarian split squat', 'TRAINING_LOAD', { structural: true, derivedFrom: [bssLoad.id] });
+    expect(evaluateDiscoveryEligibility(amount, intensity).reason).toBe('SAME_CONCEPT_REDUNDANCY');
+    expect(evaluateDiscoveryEligibility(cleanPullSets, frontSquatSets).reason).toBe('STRUCTURAL_RELATIONSHIP');
+    expect(evaluateDiscoveryEligibility(bssLoad, bssVolume).eligible).toBe(false);
+  });
+
+  it('allows the requested cross-domain athletic relationships', () => {
+    const squat = semanticSeries('squat', 'Back squat', 'PERFORMANCE', { quality: 'STRENGTH' });
+    const jump = semanticSeries('jump', 'Vertical jump', 'PERFORMANCE', { quality: 'JUMP' });
+    const fly = semanticSeries('fly', '10 m fly', 'PERFORMANCE', { quality: 'MAX_VELOCITY' });
+    const bodyweight = semanticSeries('bodyweight', 'Body metrics', 'BODY_METRIC');
+    const recovery = semanticSeries('recovery', 'Morning readiness', 'RECOVERY');
+    const volume = semanticSeries('volume', 'Sprint exposure', 'TRAINING_LOAD');
+    expect(evaluateDiscoveryEligibility(squat, jump).eligible).toBe(true);
+    expect(evaluateDiscoveryEligibility(jump, fly).eligible).toBe(true);
+    expect(evaluateDiscoveryEligibility(bodyweight, jump).eligible).toBe(true);
+    expect(evaluateDiscoveryEligibility(bodyweight, fly).eligible).toBe(true);
+    expect(evaluateDiscoveryEligibility(volume, recovery).eligible).toBe(true);
+  });
+
+  it('excludes static longitudinal profile series', () => {
+    const height = semanticSeries('height', 'Body metrics', 'BODY_METRIC');
+    height.observations = height.observations.map((item) => ({ ...item, value: 180 }));
+    height.series = height.observations;
+    expect(evaluateDiscoveryEligibility(height, semanticSeries('jump', 'Jump', 'PERFORMANCE', { quality: 'JUMP' })).reason).toBe('STATIC_SERIES');
   });
 });

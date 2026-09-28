@@ -22,7 +22,7 @@ export interface PairedObservation {
   yObservationReference?: SeriesObservation['sourceReference'];
 }
 
-export type PairingStrategy = 'same-day' | 'nearest';
+export type PairingStrategy = 'same-day' | 'nearest' | 'forward-lag';
 
 export interface AnalysisSummary {
   pairs: PairedObservation[];
@@ -52,7 +52,7 @@ export function pairSeries(
     const candidates = ys
       .filter((y) => !usedY.has(y.id))
       .map((y) => ({ y, difference: dayNumber(y.date) - dayNumber(x.date) }))
-      .filter(({ difference }) => strategy === 'same-day' ? difference === 0 : Math.abs(difference) <= maximumSeparationDays)
+      .filter(({ difference }) => strategy === 'same-day' ? difference === 0 : strategy === 'forward-lag' ? difference >= 0 && difference <= maximumSeparationDays : Math.abs(difference) <= maximumSeparationDays)
       .sort((a, b) => Math.abs(a.difference) - Math.abs(b.difference) || a.y.date.localeCompare(b.y.date) || a.y.id.localeCompare(b.y.id));
     const match = candidates[0];
     if (!match) continue;

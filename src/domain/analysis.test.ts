@@ -23,6 +23,20 @@ describe('temporal pairing', () => {
     expect(pairSeries([point('x', '2026-01-01', 1)], [point('y', '2026-01-20', 2)], 'nearest', 14)).toEqual([]);
   });
 
+  it('respects ±3, ±7 and ±14 day nearest windows', () => {
+    const x = [point('x', '2026-01-01', 1)], y = [point('y', '2026-01-08', 2)];
+    expect(pairSeries(x, y, 'nearest', 3)).toHaveLength(0);
+    expect(pairSeries(x, y, 'nearest', 7)).toHaveLength(1);
+    expect(pairSeries(x, y, 'nearest', 14)).toHaveLength(1);
+  });
+
+  it('supports forward-only symptom/recovery lags without using earlier outcomes', () => {
+    const training = [point('training', '2026-01-10', 1)];
+    const symptoms = [point('earlier', '2026-01-09', 9), point('plus2', '2026-01-12', 2)];
+    const pairs = pairSeries(training, symptoms, 'forward-lag', 3);
+    expect(pairs.map((pair) => [pair.y.id, pair.dayDifference])).toEqual([['plus2', 2]]);
+  });
+
   it('deterministically pairs duplicate-date observations one-to-one', () => {
     const pairs = pairSeries(
       [point('x2', '2026-01-01', 2), point('x1', '2026-01-01', 1)],

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { PerformanceCurveData } from '../domain/performanceCurve';
+import type { EstimatedOneRepMaxObservation, StrengthStatePoint } from '../domain/strength';
 
 export interface ChartDatum {
   id: string;
@@ -54,5 +55,27 @@ export function PerformanceCurve({ curve }: { curve: PerformanceCurveData }) {
     </svg></div>
     <div className="legend"><span><i className="dot historical" />All observations</span><span><i className="dot frontier" />Demonstrated envelope</span></div>
     {selected && <div className="point-detail"><strong>{selected.amount} {selected.amountUnit} × {selected.intensity} {selected.intensityUnit}</strong><span>{selected.observation.date ?? 'Date unknown'}</span><p>{[selected.observation.rawExtra, selected.observation.symptoms, selected.observation.notes].filter(Boolean).join(' · ') || 'No additional context recorded.'}</p></div>}
+  </div>;
+}
+
+export function StrengthEstimateChart({ observations, state }: { observations: EstimatedOneRepMaxObservation[]; state: StrengthStatePoint[] }) {
+  const [selectedRaw, setSelectedRaw] = useState<EstimatedOneRepMaxObservation>();
+  const [selectedState, setSelectedState] = useState<StrengthStatePoint>();
+  if (!observations.length) return <div className="empty-state">No qualifying 1–12 rep performances for e1RM modelling.</div>;
+  const width = 760, height = 310, left = 48, right = 20, top = 28, bottom = 44;
+  const days = observations.map((item) => Date.parse(`${item.date}T00:00:00Z`));
+  const values = [...observations.map((item) => item.e1rmKg), ...state.map((item) => item.estimatedStrengthKg)];
+  const minDay = Math.min(...days), maxDay = Math.max(...days), minValue = Math.min(...values), maxValue = Math.max(...values), valuePad = (maxValue - minValue || 1) * .1;
+  const sx = (date: string) => left + ((Date.parse(`${date}T00:00:00Z`) - minDay) / (maxDay - minDay || 1)) * (width - left - right);
+  const sy = (value: number) => height - bottom - ((value - (minValue - valuePad)) / (maxValue - minValue + valuePad * 2 || 1)) * (height - top - bottom);
+  return <div><div className="chart-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Raw estimated one repetition maximum observations and rolling estimated current strength over time">
+    <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} className="axis" /><line x1={left} y1={top} x2={left} y2={height - bottom} className="axis" />
+    {state.length > 1 && <polyline points={state.map((item) => `${sx(item.date)},${sy(item.estimatedStrengthKg)}`).join(' ')} className="strength-state-line" />}
+    {observations.map((item) => <g key={item.id} className="raw-estimate-point" role="button" tabIndex={0} onClick={() => { setSelectedRaw(item); setSelectedState(undefined); }} onKeyDown={(event) => event.key === 'Enter' && setSelectedRaw(item)}><circle cx={sx(item.date)} cy={sy(item.e1rmKg)} r="5" /><title>{item.date}: {item.loadKg} kg × {item.reps} → {item.e1rmKg.toFixed(1)} kg e1RM</title></g>)}
+    {state.map((item) => <g key={item.date} className="strength-state-point" role="button" tabIndex={0} onClick={() => { setSelectedState(item); setSelectedRaw(undefined); }} onKeyDown={(event) => event.key === 'Enter' && setSelectedState(item)}><circle cx={sx(item.date)} cy={sy(item.estimatedStrengthKg)} r="6" /><title>{item.date}: modelled current strength {item.estimatedStrengthKg.toFixed(1)} kg</title></g>)}
+    <text x={left} y={18} className="chart-label">Estimated 1RM (kg)</text><text x={left} y={height - 10} className="chart-label">{new Date(minDay).toISOString().slice(0, 10)}</text><text x={width - right} y={height - 10} textAnchor="end" className="chart-label">{new Date(maxDay).toISOString().slice(0, 10)}</text>
+  </svg></div><div className="legend"><span><i className="dot raw-estimate" />Raw set estimate</span><span><i className="dot strength-state" />Estimated current strength</span></div>
+    {selectedRaw && <div className="point-detail"><strong>{selectedRaw.loadKg} kg × {selectedRaw.reps} → {selectedRaw.e1rmKg.toFixed(1)} kg e1RM</strong><span>{selectedRaw.date}{selectedRaw.rpe != null ? ` · RPE ${selectedRaw.rpe}` : ' · RPE unknown'}{selectedRaw.session ? ` · ${selectedRaw.session}` : ''}</span><p>{[selectedRaw.rawExtra, selectedRaw.symptoms, selectedRaw.notes].filter(Boolean).join(' · ') || 'No additional metadata recorded.'}</p></div>}
+    {selectedState && <div className="point-detail"><strong>Estimated current strength: {selectedState.estimatedStrengthKg.toFixed(1)} kg</strong><span>{selectedState.date} · upper-performance estimate from {selectedState.contributingObservationIds.length} recent observation{selectedState.contributingObservationIds.length === 1 ? '' : 's'}</span><p>Uses the best recent qualifying performances from {selectedState.windowStart} through {selectedState.date}. This is modelled state, not a lift performed on this date.</p></div>}
   </div>;
 }
