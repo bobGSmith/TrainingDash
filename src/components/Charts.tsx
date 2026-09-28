@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { PerformanceCurveData } from '../domain/performanceCurve';
 import type { EstimatedOneRepMaxObservation, StrengthStatePoint } from '../domain/strength';
+import type { AccelerationEnvelopePoint, SprintSpeedMetric } from '../domain/sprintAnalysis';
+import { formatSprintConditions } from '../domain/sprintPresentation';
 
 export interface ChartDatum {
   id: string;
@@ -78,4 +80,39 @@ export function StrengthEstimateChart({ observations, state }: { observations: E
     {selectedRaw && <div className="point-detail"><strong>{selectedRaw.loadKg} kg × {selectedRaw.reps} → {selectedRaw.e1rmKg.toFixed(1)} kg e1RM</strong><span>{selectedRaw.date}{selectedRaw.rpe != null ? ` · RPE ${selectedRaw.rpe}` : ' · RPE unknown'}{selectedRaw.session ? ` · ${selectedRaw.session}` : ''}</span><p>{[selectedRaw.rawExtra, selectedRaw.symptoms, selectedRaw.notes].filter(Boolean).join(' · ') || 'No additional metadata recorded.'}</p></div>}
     {selectedState && <div className="point-detail"><strong>Estimated current strength: {selectedState.estimatedStrengthKg.toFixed(1)} kg</strong><span>{selectedState.date} · upper-performance estimate from {selectedState.contributingObservationIds.length} recent observation{selectedState.contributingObservationIds.length === 1 ? '' : 's'}</span><p>Uses the best recent qualifying performances from {selectedState.windowStart} through {selectedState.date}. This is modelled state, not a lift performed on this date.</p></div>}
   </div>;
+}
+
+export function SprintProgressChart({ metrics, mode, showPbProgression = true }: { metrics: SprintSpeedMetric[]; mode: 'time' | 'speed'; showPbProgression?: boolean }) {
+  const [selected, setSelected] = useState<SprintSpeedMetric>();
+  if (!metrics.length) return <div className="empty-state">No compatible timed performances.</div>;
+  const sorted = [...metrics].filter((item) => item.observation.date).sort((a, b) => (a.observation.date ?? '').localeCompare(b.observation.date ?? '') || a.observation.rowNumber - b.observation.rowNumber);
+  const value = (item: SprintSpeedMetric) => mode === 'time' ? item.observation.timeSeconds : item.averageSpeedMS;
+  let best: number | undefined;
+  const pb = showPbProgression ? sorted.filter((item) => { const current = value(item), improves = best == null || (mode === 'time' ? current < best : current > best); if (improves) best = current; return improves; }) : [];
+  const width = 760, height = 310, left = 64, right = 22, top = 28, bottom = 58;
+  const dates = sorted.map((item) => Date.parse(`${item.observation.date}T00:00:00Z`)), values = sorted.map(value), minDate = Math.min(...dates), maxDate = Math.max(...dates), min = Math.min(...values), max = Math.max(...values), pad = (max - min || 1) * .1;
+  const sx = (date: string) => left + ((Date.parse(`${date}T00:00:00Z`) - minDate) / (maxDate - minDate || 1)) * (width - left - right);
+  const sy = (metric: number) => height - bottom - ((metric - (min - pad)) / (max - min + pad * 2 || 1)) * (height - top - bottom);
+  const unit = mode === 'time' ? 's' : 'm/s';
+  const lowerBound = min - pad, upperBound = max + pad;
+  const yTicks = Array.from({ length: 5 }, (_, index) => lowerBound + (upperBound - lowerBound) * index / 4);
+  const xTicks = [...new Set([minDate, minDate + (maxDate - minDate) / 2, maxDate])];
+  const dateLabel = (date: number) => new Date(date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'UTC' });
+  return <div><div className="chart-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Sprint performance over time in ${unit}`}>
+    {yTicks.map((tick) => <g key={tick}><line x1={left} y1={sy(tick)} x2={width - right} y2={sy(tick)} className="chart-grid" /><text x={left - 9} y={sy(tick) + 4} textAnchor="end" className="chart-label">{tick.toFixed(mode === 'time' ? 3 : 2)}</text></g>)}
+    {xTicks.map((tick) => <g key={tick}><line x1={sx(new Date(tick).toISOString().slice(0, 10))} y1={height - bottom} x2={sx(new Date(tick).toISOString().slice(0, 10))} y2={height - bottom + 5} className="axis" /><text x={sx(new Date(tick).toISOString().slice(0, 10))} y={height - bottom + 20} textAnchor={tick === minDate ? 'start' : tick === maxDate ? 'end' : 'middle'} className="chart-label">{dateLabel(tick)}</text></g>)}
+    <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} className="axis" /><line x1={left} y1={top} x2={left} y2={height - bottom} className="axis" />
+    {pb.length > 1 && <polyline points={pb.map((item) => `${sx(item.observation.date!)},${sy(value(item))}`).join(' ')} className="frontier-line" />}
+    {sorted.map((item) => <g key={`${item.observation.tab}:${item.observation.rowNumber}:${mode}`} className="raw-sprint-point" onClick={() => setSelected(item)} onKeyDown={(event) => event.key === 'Enter' && setSelected(item)} role="button" tabIndex={0}><circle cx={sx(item.observation.date!)} cy={sy(value(item))} r="6" /><title>{item.observation.date}: {value(item).toFixed(3)} {unit}</title></g>)}
+    <text x={14} y={(top + height - bottom) / 2} textAnchor="middle" transform={`rotate(-90 14 ${(top + height - bottom) / 2})`} className="chart-label axis-title">{mode === 'time' ? 'Time (seconds)' : 'Average speed (m/s)'}</text>
+    <text x={(left + width - right) / 2} y={height - 7} className="chart-label axis-title">Date</text>
+  </svg></div><div className="legend"><span><i className="dot raw-sprint" />Recorded performance</span>{showPbProgression && <span><i className="dot frontier" />PB progression</span>}</div><p className="muted">{mode === 'time' ? 'Lower is better.' : 'Higher is better.'}</p>{selected && <div className="point-detail"><strong>{selected.observation.timeSeconds.toFixed(3)} s · {selected.averageSpeedMS.toFixed(2)} m/s · {selected.averageSpeedKMH.toFixed(1)} km/h</strong><span>{[selected.observation.date, formatSprintConditions(selected.observation)].filter(Boolean).join(' · ')}</span><p>{[selected.observation.symptoms && `Symptoms: ${selected.observation.symptoms}`, selected.observation.notes && `Notes: ${selected.observation.notes}`].filter(Boolean).join(' · ') || 'No additional notes.'}</p></div>}</div>;
+}
+
+export function AccelerationEnvelopeChart({ points }: { points: AccelerationEnvelopePoint[] }) {
+  const [selected, setSelected] = useState<AccelerationEnvelopePoint>();
+  if (!points.length) return <div className="empty-state">No compatible acceleration/start performances.</div>;
+  const width = 760, height = 270, pad = 44, maxX = Math.max(...points.map((item) => item.distanceMetres)), maxY = Math.max(...points.map((item) => item.timeSeconds));
+  const sx = (value: number) => pad + value / maxX * (width - pad * 2), sy = (value: number) => height - pad - value / maxY * (height - pad * 2);
+  return <div><div className="chart-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Best compatible acceleration performance envelope"><line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="axis" /><line x1={pad} y1={pad} x2={pad} y2={height - pad} className="axis" />{points.length > 1 && <polyline points={points.map((item) => `${sx(item.distanceMetres)},${sy(item.timeSeconds)}`).join(' ')} className="acceleration-envelope-line" />}{points.map((item) => <g key={item.distanceMetres} className="chart-point" onClick={() => setSelected(item)}><circle cx={sx(item.distanceMetres)} cy={sy(item.timeSeconds)} r="7" /><title>{item.distanceMetres.toFixed(1)} m: {item.timeSeconds.toFixed(3)} s</title></g>)}<text x={width / 2} y={height - 7} className="chart-label axis-title">Distance (m)</text><text x={7} y={18} className="chart-label">Best time (s)</text></svg></div><p className="muted">Best performance envelope from independently recorded compatible starts—not splits from one sprint.</p>{selected && <div className="point-detail"><strong>{selected.distanceMetres.toFixed(1)} m · {selected.timeSeconds.toFixed(3)} s</strong><span>{selected.averageSpeedMS.toFixed(2)} m/s average · {selected.observation.date ?? 'Date unknown'}</span></div>}</div>;
 }

@@ -23,6 +23,15 @@ describe('numeric series registry', () => {
     expect(times.map((item) => item.metadata.protocol)).toEqual(['Max velocity · 10m lead-in', 'Max velocity · 20m lead-in']);
   });
 
+  it('registers sprint average speed as derived from distance and time', () => {
+    const registry = buildAnalysisVariables(workbook([base({ category: 'Max velocity', exercise: '10 m fly', amount: 10, amountUnit: 'm', intensity: 1.162, intensityUnit: 's' })]));
+    const speed = registry.find((item) => item.metric === 'average-speed');
+    expect(speed?.observations[0]?.value).toBeCloseTo(8.6059, 3);
+    expect(speed?.derived).toBe(true);
+    expect(speed?.derivedFrom).toHaveLength(2);
+    expect(speed?.higherIsBetter).toBe(true);
+  });
+
   it('extracts repeated numeric Extra values without turning missing Extra into zero', () => {
     const registry = buildAnalysisVariables(workbook([
       base({ rowNumber: 2, extra: { bodyweight_kg: 80 } }),

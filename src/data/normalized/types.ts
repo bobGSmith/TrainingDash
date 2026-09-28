@@ -22,8 +22,10 @@ export interface SprintPerformance extends SourceReference, PerformanceContext {
   timeSeconds: number;
   effortPercent?: number;
   sets?: number;
+  session?: string;
   symptoms?: string;
   notes?: string;
+  rawExtra?: string;
   extra?: Metadata;
 }
 

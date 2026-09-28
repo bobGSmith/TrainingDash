@@ -1,6 +1,7 @@
 import type { NormalizedWorkbook, TrainingSession } from '../data/normalized/types';
 import type { SeriesObservation } from './analysis';
 import { estimate1RM, isBodyweightAugmentedExercise, MAX_E1RM_REPS } from './strength';
+import { averageSpeedMS, yardsToMetres } from './sprintAnalysis';
 
 export interface NumericSeries {
   id: string;
@@ -148,6 +149,14 @@ export function buildAnalysisVariables(data: NormalizedWorkbook): AnalysisVariab
       variable(exercise, 'intensity', 'Intensity', intensityUnit, direction, rows.map((row) => row.intensity == null ? undefined : point(row, row.intensity, 'Intensity', row.intensityUnit, direction)), rows, intensityFamily(intensityUnit), false, true, protocol, [], athleticQuality(rows) === 'STRENGTH'),
       variable(exercise, 'sets', 'Sets', 'sets', 'neutral', rows.map((row) => row.sets == null ? undefined : point(row, row.sets, 'Sets', 'sets')), rows, 'TRAINING_LOAD', false, true, protocol, [], true),
     ];
+    const sprintSpeed = rows.map((row) => {
+      if (row.intensityUnit?.toLowerCase() !== 's' || row.amount == null || row.intensity == null) return undefined;
+      const unit = row.amountUnit?.toLowerCase();
+      const distanceMetres = unit === 'm' ? row.amount : unit === 'yd' ? yardsToMetres(row.amount) : undefined;
+      const speed = averageSpeedMS(distanceMetres, row.intensity);
+      return speed == null ? undefined : point(row, speed, 'Average speed', 'm/s', 'higher');
+    });
+    candidates.push(variable(exercise, 'average-speed', 'Average speed', 'm/s', 'higher', sprintSpeed, rows, 'PERFORMANCE', true, true, protocol, [amountId, intensityId]));
     const distanceExposure = rows.map((row) => row.sets == null || row.amount == null || !['m', 'yd'].includes(row.amountUnit?.toLowerCase() ?? '') ? undefined : point(row, row.sets * row.amount, 'Distance exposure', row.amountUnit));
     candidates.push(variable(exercise, 'distance-exposure', 'Distance exposure', amountUnit, 'neutral', distanceExposure, rows, 'TRAINING_LOAD', true, true, protocol, [amountId, seriesId(exercise, 'sets', 'sets', protocol)], true));
     const symptomPoints = rows.map((row) => { const value = symptomScore(row.symptoms); return value == null ? undefined : point(row, value, 'Recorded symptom score', '0–10'); });

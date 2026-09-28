@@ -40,4 +40,10 @@ describe('10 m fly regression', () => {
     expect(filterSprintPerformances(unknown.sprints, { test: '10 m fly', leadInMetres: 20 })).toHaveLength(0);
     expect(filterSprintPerformances(unknown.sprints, { test: '10 m fly', leadInMetres: 'unknown' })).toHaveLength(1);
   });
+
+  it('filters surface, footwear, start and timing without treating unknown as a match', () => {
+    const rows = normalizeWorkbook(workbook([header, [...fly('2026-09-22', '1.19', 'Trainers', '20').slice(0, 16), '3-point'], ['2026-09-23', 'Sprint', 'Acceleration', '10 m start', '1', '10', 'm', '1.6', 's', 'Grass', 'Spikes', '', '', '', 'Gates', '1', '3-point']]));
+    expect(filterSprintPerformances(rows.sprints, { surface: 'Grass', footwear: 'Spikes', startType: '3-point', timingMethod: 'Gates' })).toHaveLength(1);
+    expect(filterSprintPerformances(rows.sprints, { timingMethod: 'Unknown' }).every((item) => item.timingMethod == null)).toBe(true);
+  });
 });

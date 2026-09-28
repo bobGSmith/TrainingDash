@@ -5,6 +5,8 @@ export interface SprintFilters {
   surface?: string;
   footwear?: string;
   leadInMetres?: number | 'unknown';
+  startType?: string;
+  timingMethod?: string;
 }
 
 export function filterSprintPerformances(
@@ -17,6 +19,8 @@ export function filterSprintPerformances(
     if (filters.footwear && filters.footwear !== 'All' && performance.footwear !== filters.footwear) return false;
     if (filters.leadInMetres === 'unknown' && performance.leadInMetres != null) return false;
     if (typeof filters.leadInMetres === 'number' && performance.leadInMetres !== filters.leadInMetres) return false;
+    if (filters.startType && filters.startType !== 'All' && (filters.startType === 'Unknown' ? performance.startType != null : performance.startType !== filters.startType)) return false;
+    if (filters.timingMethod && filters.timingMethod !== 'All' && (filters.timingMethod === 'Unknown' ? performance.timingMethod != null : performance.timingMethod !== filters.timingMethod)) return false;
     return true;
   });
 }

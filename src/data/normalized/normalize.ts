@@ -57,8 +57,8 @@ function sprintPerformances(rows: TrainingSession[]): SprintPerformance[] {
     if (!row.exercise || !['m', 'yd'].includes(row.amountUnit?.toLowerCase() ?? '')) return [];
     return [{ kind: 'sprint' as const, tab: row.tab, rowNumber: row.rowNumber, date: row.date, test: row.exercise,
       distanceMetres: row.amountUnit?.toLowerCase() === 'yd' ? row.amount * 0.9144 : row.amount, timeSeconds: row.intensity,
-      effortPercent: row.effortPercent, sets: row.sets, surface: row.surface, footwear: row.footwear, protocol: row.category,
-      startType: row.stance, leadInMetres: row.leadInMetres, timingMethod: row.timingStart, symptoms: row.symptoms, notes: row.notes, extra: row.extra,
+      effortPercent: row.effortPercent, sets: row.sets, session: row.session, surface: row.surface, footwear: row.footwear, protocol: row.category,
+      startType: row.stance, leadInMetres: row.leadInMetres, timingMethod: row.timingStart, symptoms: row.symptoms, notes: row.notes, rawExtra: row.rawExtra, extra: row.extra,
     }];
   });
 }
