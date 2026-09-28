@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { NormalizedWorkbook } from '../data/normalized/types';
 import { analyseSeries, type AnalysisSummary, type PairingStrategy, type PairedObservation } from '../domain/analysis';
 import { buildAnalysisVariables, type AnalysisVariable } from '../domain/analysisVariables';
-import { DEFAULT_DISCOVERY_MIN_N, discoverRelationships, type DiscoveryResult } from '../domain/discovery';
+import { DEFAULT_DISCOVERY_MIN_N, discoverRelationshipsDetailed, type DiscoveryReport, type DiscoveryResult } from '../domain/discovery';
 
 export function AnalysisPage({ data }: { data: NormalizedWorkbook }) {
   const variables = useMemo(() => buildAnalysisVariables(data), [data]);
@@ -19,7 +19,7 @@ export function AnalysisPage({ data }: { data: NormalizedWorkbook }) {
   const x = variables.find((variable) => variable.id === xId) ?? initialX;
   const y = variables.find((variable) => variable.id === yId) ?? initialY;
   const summary = useMemo(() => x && y ? analyseSeries(x.series, y.series, strategy, windowDays) : undefined, [x, y, strategy, windowDays]);
-  const discoveries = useMemo(() => discoverRelationships(variables, { strategy: 'same-day', minimumN }), [variables, minimumN]);
+  const discoveryReport = useMemo(() => discoverRelationshipsDetailed(variables, { strategy: 'same-day', minimumN }), [variables, minimumN]);
 
   const selectExercise = (axis: 'x' | 'y', exercise: string) => {
     const next = variables.find((variable) => variable.exercise === exercise);
@@ -31,7 +31,7 @@ export function AnalysisPage({ data }: { data: NormalizedWorkbook }) {
   return <>
     <header className="page-header"><p className="eyebrow">Exploratory</p><h1>Analysis</h1><p>Explore associations between recorded variables. Pairing is explicit, raw points remain visible, and correlation does not establish causation.</p></header>
     <div className="analysis-tabs" role="tablist"><button role="tab" aria-selected={mode === 'explore'} className={mode === 'explore' ? 'active' : ''} onClick={() => setMode('explore')}>Explore</button><button role="tab" aria-selected={mode === 'discover'} className={mode === 'discover' ? 'active' : ''} onClick={() => setMode('discover')}>Discover</button></div>
-    {mode === 'discover' ? <DiscoverView discoveries={discoveries} minimumN={minimumN} onMinimumN={setMinimumN} onInspect={inspectDiscovery} /> : <>
+    {mode === 'discover' ? <DiscoverView report={discoveryReport} minimumN={minimumN} onMinimumN={setMinimumN} onInspect={inspectDiscovery} /> : <>
     <section className="analysis-builder">
       <AxisSelector axis="X" variable={x} variables={variables} exercises={exercises} onExercise={(value) => selectExercise('x', value)} onVariable={setXId} />
       <div className="axis-link" aria-hidden="true">×</div>
@@ -48,10 +48,13 @@ export function AnalysisPage({ data }: { data: NormalizedWorkbook }) {
   </>;
 }
 
-function DiscoverView({ discoveries, minimumN, onMinimumN, onInspect }: { discoveries: DiscoveryResult[]; minimumN: number; onMinimumN(value: number): void; onInspect(result: DiscoveryResult): void }) {
+function DiscoverView({ report, minimumN, onMinimumN, onInspect }: { report: DiscoveryReport; minimumN: number; onMinimumN(value: number): void; onInspect(result: DiscoveryResult): void }) {
+  const [showAll, setShowAll] = useState(false);
+  const discoveries = showAll ? report.allResults : report.results;
   return <><section className="panel discovery-intro"><div><p className="eyebrow">Exploratory screening</p><h2>Relationships worth exploring</h2><p>Eligible series are paired on the same day, screened cheaply, and corrected together for multiple testing. Rankings prioritise effect size, sample size, FDR evidence, and agreement between Pearson and Spearman.</p></div><label className="select-label"><span>Minimum paired n</span><select value={minimumN} onChange={(event) => onMinimumN(Number(event.target.value))}>{[6, 8, 10, 12].map((value) => <option key={value}>{value}</option>)}</select></label></section>
     <div className="notice analysis-warning"><strong>Exploratory, not causal</strong><span>Shared trends over time and repeated training cycles can create associations. Raw points should be inspected before interpreting a result.</span></div>
-    {discoveries.length ? <section className="discovery-list">{discoveries.slice(0, 30).map((result) => <button className="discovery-row" key={`${result.xSeriesId}:${result.ySeriesId}`} onClick={() => onInspect(result)}><div><strong>{result.xLabel}</strong><span>↔</span><strong>{result.yLabel}</strong></div><dl><div><dt>r</dt><dd>{result.pearsonR.toFixed(3)}</dd></div><div><dt>ρ</dt><dd>{result.spearmanRho.toFixed(3)}</dd></div><div><dt>n</dt><dd>{result.n}</dd></div><div><dt>p</dt><dd>{formatProbability(result.rawP)}</dd></div><div><dt>FDR q</dt><dd>{formatProbability(result.qValue)}</dd></div></dl><small>Inspect raw observations →</small></button>)}</section> : <div className="empty-state">No relationships have at least {minimumN} valid same-day pairs. This is a valid result—not enough data is preferable to a misleading correlation.</div>}
+    <div className="discovery-tools"><button className="secondary-button compact-button" onClick={() => setShowAll((value) => !value)}>{showAll ? 'Show grouped shortlist' : `Show all ${report.allResults.length} eligible analyses`}</button><details><summary>Filtering diagnostics</summary><div><span>Candidate pairs before semantic filtering <strong>{report.candidateCountBeforeFiltering}</strong></span><span>Semantically eligible <strong>{report.eligibleCandidateCount}</strong></span><span>Statistically tested <strong>{report.testedRelationshipCount}</strong></span>{Object.entries(report.rejectedCounts).map(([reason, count]) => <span key={reason}>{reason.replaceAll('_', ' ').toLowerCase()} <strong>{count}</strong></span>)}</div></details></div>
+    {discoveries.length ? <section className="discovery-list">{discoveries.slice(0, 30).map((result) => <button className="discovery-row" key={`${result.xSeriesId}:${result.ySeriesId}`} onClick={() => onInspect(result)}><div><strong>{result.xLabel}</strong><span>↔</span><strong>{result.yLabel}</strong></div><dl><div><dt>r</dt><dd>{result.pearsonR.toFixed(3)}</dd></div><div><dt>ρ</dt><dd>{result.spearmanRho.toFixed(3)}</dd></div><div><dt>n</dt><dd>{result.n}</dd></div><div><dt>p</dt><dd>{formatProbability(result.rawP)}</dd></div><div><dt>FDR q</dt><dd>{formatProbability(result.qValue)}</dd></div></dl><small>{result.relatedAnalysisCount > 1 ? `${result.relatedAnalysisCount} related · ` : ''}Inspect raw observations →</small></button>)}</section> : <div className="empty-state">No relationships have at least {minimumN} valid same-day pairs. This is a valid result—not enough data is preferable to a misleading correlation.</div>}
   </>;
 }
 

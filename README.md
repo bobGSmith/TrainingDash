@@ -688,6 +688,8 @@ Analysis has two complementary modes. **Explore** provides explicit X/Y selectio
 
 The numeric-series registry is generated once per normalized workbook. It keeps units and explicitly recorded measurement protocols in series identity, marks performance direction without altering raw values, retains source row references, and excludes sparse arbitrary metadata fields. Unknown protocol remains unknown. Current nearest matching is deterministic and greedy in chronological X order: each X receives the closest unused Y within the selected window, with earlier date/reference used to break ties. This prevents inflated sample sizes from repeatedly reusing a single observation.
 
+Automatic discovery also applies semantic candidate filtering before statistics. Each series declares a metric family (`PERFORMANCE`, `EFFORT`, `SYMPTOM`, `VOLUME`, `RECOVERY`, `BODY_METRIC`, or `CONTEXT`), direct derivation dependencies, source-observation identities, and a relationship concept. Direct mathematical dependencies, same-exercise performance variants, incompatible known protocols, duplicate series, and high same-source leakage within one metric family are excluded from Discover but remain selectable in Explore. The main discovery list shows the best-supported representative for each concept relationship; the complete eligible set and rejection diagnostics remain inspectable.
+
 ## GitHub Pages preparation
 
 This repository defaults to the GitHub Pages project path `/TrainingDash/`, matching `https://bobgsmith.github.io/TrainingDash/`. Override it for another deployment with `VITE_BASE_PATH=/another-path/ npm run build`.
