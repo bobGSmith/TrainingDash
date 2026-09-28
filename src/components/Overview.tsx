@@ -6,6 +6,7 @@ import type { RawWorkbook } from '../data/raw/types';
 import { RawDataInspector } from './RawDataInspector';
 import { chronologicalPBProgression, jumpPBs, sprintPBs } from '../domain/pb';
 import { latestRecordedDate, withinLookback, type LookbackWindow } from '../domain/lookback';
+import { representativeStrengthPerformance } from '../domain/overview';
 
 interface Props {
   athlete: AthleteConfig;
@@ -109,11 +110,10 @@ function AthleteOverview({ data }: { data: NormalizedWorkbook }) {
     return pb ? { name: test!, value: `${pb.result} ${unit}`, date: pb.date, context: [pb.surface, pb.footwear].filter(Boolean).join(' · ') || 'Conditions unknown', change: progression.at(-1)?.improvement } : undefined;
   }).filter(Boolean);
   const strengthCards = [...new Set(strength.map((item) => item.exercise))].map((exercise) => {
-    const rows = strength.filter((item) => item.exercise === exercise).sort((a, b) => b.loadKg - a.loadKg || b.reps - a.reps);
-    const best = rows[0];
+    const best = representativeStrengthPerformance(strength.filter((item) => item.exercise === exercise));
     return best ? { name: exercise, value: `${best.loadKg} kg × ${best.reps}`, date: best.date, context: [best.rpe != null ? `RPE ${best.rpe}` : undefined, best.velocityMps != null ? `${best.velocityMps} m/s` : undefined].filter(Boolean).join(' · ') || 'No RPE or velocity recorded', change: undefined } : undefined;
   }).filter(Boolean);
-  const cards = [...sprintCards, ...jumpCards, ...strengthCards].sort((a, b) => (b?.date ?? '').localeCompare(a?.date ?? '')).slice(0, 12);
+  const cards = [...sprintCards, ...jumpCards, ...strengthCards].sort((a, b) => (b?.date ?? '').localeCompare(a?.date ?? ''));
   const recentDates = [...new Set(data.training.map((row) => row.date).filter((date): date is string => Boolean(date)))].sort().reverse().slice(0, 4);
   const recentStatus = [...data.dailyStatus].sort((a,b)=>(b.date??'').localeCompare(a.date??'')).slice(0, 3);
   return <>
