@@ -3,8 +3,9 @@ import { Overview } from './components/Overview';
 import { DEFAULT_ATHLETE } from './config/athletes';
 import { useDashboardData } from './hooks/useDashboardData';
 import { JumpPage, RecoveryPage, SprintPage, StrengthPage, TrainingPage } from './components/AthleticPages';
+import { AnalysisPage } from './components/AnalysisPage';
 
-const SECTIONS = ['Overview', 'Sprint', 'Jumps', 'Strength', 'Training', 'Recovery'] as const;
+const SECTIONS = ['Overview', 'Analysis', 'Sprint', 'Jumps', 'Strength', 'Training', 'Recovery'] as const;
 type Section = (typeof SECTIONS)[number];
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
               onReload={dashboard.reload}
             />
           ) : dashboard.normalized ? (
+            section === 'Analysis' ? <AnalysisPage data={dashboard.normalized} /> :
             section === 'Sprint' ? <SprintPage data={dashboard.normalized} /> :
             section === 'Jumps' ? <JumpPage data={dashboard.normalized} /> :
             section === 'Strength' ? <StrengthPage data={dashboard.normalized} /> :
@@ -56,6 +58,6 @@ function Placeholder({ section }: { section: Exclude<Section, 'Overview'> }) {
 }
 
 function NavIcon({ name }: { name: Section }) {
-  const icons: Record<Section, string> = { Overview: '⌂', Sprint: '↗', Jumps: '↥', Strength: '◇', Training: '≡', Recovery: '♡' };
+  const icons: Record<Section, string> = { Overview: '⌂', Analysis: '⌁', Sprint: '↗', Jumps: '↥', Strength: '◇', Training: '≡', Recovery: '♡' };
   return <span className="nav-icon" aria-hidden="true">{icons[name]}</span>;
 }

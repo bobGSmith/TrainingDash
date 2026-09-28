@@ -646,6 +646,8 @@ The first working foundation includes:
 - separate raw, normalised and derived-data modules
 - typed initial normalisers for testing, lifting, performed training and daily status data
 - sprint/jump PB, chronological progression and lifting-frontier utilities with unit tests
+- a generic exploratory Analysis page with data-derived exercise/metric selectors, same-day or nearest-observation pairing, interactive scatter plots, Pearson correlation, Spearman rank correlation and visible sample sizes
+- a framework-independent analysis engine with one-to-one temporal pairing and regression/statistics utilities covered by unit tests
 - a responsive application shell and authenticated import/debug overview
 
 The testing-data normaliser is intentionally conservative because historical sheet headers may vary. Use the raw-data inspector to validate the live schema before expanding analysis views. `Program` is fetched for inspection but is never included in performed training.
@@ -679,6 +681,8 @@ npm run build
 ```
 
 Access tokens are retained only in React state for the current page lifetime. They are not persisted or placed in URLs.
+
+The Analysis page derives selectable numeric series from performed-training fields and numeric `Extra` metadata. Its nearest-observation mode uses each observation at most once and always reports the date separation. Missing measurements are omitted, never converted to zero. Correlations describe associations in the recorded observations and should not be interpreted as causal evidence.
 
 ## GitHub Pages preparation
 
