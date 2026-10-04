@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SprintPerformance } from '../data/normalized/types';
-import { accelerationEnvelope, averageSpeedMS, compatiblePredictionModels, metresPerSecondToKmh, protocolAwarePBs, selectPredictionInputs, speedRetention, sprintProtocolFamily, sprintProtocolKey, sprintSpeedMetric, yardsToMetres, type SprintPredictionModel } from './sprintAnalysis';
+import { accelerationEnvelope, averageSpeedMS, compatiblePredictionModels, isExplicitSprintWarmup, metresPerSecondToKmh, protocolAwarePBs, selectPredictionInputs, speedRetention, sprintProtocolFamily, sprintProtocolKey, sprintSessionSummaries, sprintSpeedMetric, yardsToMetres, type SprintPredictionModel } from './sprintAnalysis';
 
 const sprint = (rowNumber: number, test: string, distanceMetres: number, timeSeconds: number, overrides: Partial<SprintPerformance> = {}): SprintPerformance => ({ kind: 'sprint', tab: 'Full Session tracking', rowNumber, date: `2026-01-${String(rowNumber).padStart(2, '0')}`, test, distanceMetres, timeSeconds, protocol: 'Acceleration', ...overrides });
 
@@ -45,6 +45,35 @@ describe('sprint derived metrics', () => {
     const retention = speedRetention(race, fly);
     expect(retention?.retentionPercent).toBeCloseTo((100 / 12.796) / (10 / 1.162) * 100, 5);
     expect(retention?.derivedFrom).toHaveLength(4);
+  });
+
+  it('summarises the fastest rep, mean and sample variability for each session', () => {
+    const observations = [
+      sprint(1, '10 m fly', 10, 1.2, { date: '2026-09-21', session: 'Sprint' }),
+      sprint(2, '10 m fly', 10, 1.1, { date: '2026-09-21', session: 'Sprint' }),
+      sprint(3, '10 m fly', 10, 1.3, { date: '2026-09-21', session: 'Sprint' }),
+    ];
+    const summary = sprintSessionSummaries(observations)[0]!;
+    expect(summary.fastestTimeSeconds).toBe(1.1);
+    expect(summary.meanTimeSeconds).toBeCloseTo(1.2);
+    expect(summary.timeStandardDeviation).toBeCloseTo(0.1);
+    expect(summary.observations).toHaveLength(3);
+  });
+
+  it('excludes only explicitly identifiable warm-up or low-effort reps', () => {
+    const observations = [
+      sprint(1, '10 m fly', 10, 1.4, { date: '2026-09-21', session: 'Sprint', effortPercent: 80 }),
+      sprint(2, '10 m fly', 10, 1.35, { date: '2026-09-21', session: 'Sprint', notes: 'Warm-up rep' }),
+      sprint(3, '10 m fly', 10, 1.2, { date: '2026-09-21', session: 'Sprint' }),
+      sprint(4, '10 m fly', 10, 1.1, { date: '2026-09-21', session: 'Sprint' }),
+    ];
+    expect(isExplicitSprintWarmup(observations[0]!)).toBe(true);
+    expect(isExplicitSprintWarmup(observations[1]!)).toBe(true);
+    expect(isExplicitSprintWarmup(observations[2]!)).toBe(false);
+    const summary = sprintSessionSummaries(observations)[0]!;
+    expect(summary.excludedWarmupCount).toBe(2);
+    expect(summary.observations).toHaveLength(2);
+    expect(summary.meanTimeSeconds).toBeCloseTo(1.15);
   });
 });
 

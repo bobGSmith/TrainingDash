@@ -26,6 +26,22 @@ export interface SprintConsistency {
   coefficientOfVariation?: number;
 }
 
+export const DEFAULT_SPRINT_WORK_REP_MIN_EFFORT_PERCENT = 90;
+
+export interface SprintSessionSummary {
+  id: string;
+  date: string;
+  session?: string;
+  observations: SprintPerformance[];
+  excludedWarmupCount: number;
+  fastestTimeSeconds: number;
+  meanTimeSeconds: number;
+  timeStandardDeviation?: number;
+  fastestSpeedMS: number;
+  meanSpeedMS: number;
+  speedStandardDeviation?: number;
+}
+
 export interface SpeedRetentionMetric {
   longSprint: SprintSpeedMetric;
   flyReference: SprintSpeedMetric;
@@ -138,6 +154,43 @@ export function speedRetention(longSprint: SprintPerformance, flyReference: Spri
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function sampleStandardDeviation(values: readonly number[]): number | undefined {
+  if (values.length < 2) return undefined;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1));
+}
+
+export function isExplicitSprintWarmup(observation: SprintPerformance, minimumEffortPercent = DEFAULT_SPRINT_WORK_REP_MIN_EFFORT_PERCENT): boolean {
+  if (observation.effortPercent != null && observation.effortPercent < minimumEffortPercent) return true;
+  const metadata = observation.extra ?? {};
+  if (metadata.warmup === true || metadata.warm_up === true || metadata.is_warmup === true) return true;
+  const text = [observation.session, observation.notes, observation.rawExtra, ...Object.values(metadata).filter((value): value is string => typeof value === 'string')].filter(Boolean).join(' ');
+  return /\bwarm[ -]?up\b/i.test(text);
+}
+
+export function sprintSessionSummaries(observations: readonly SprintPerformance[], minimumEffortPercent = DEFAULT_SPRINT_WORK_REP_MIN_EFFORT_PERCENT): SprintSessionSummary[] {
+  const groups = new Map<string, SprintPerformance[]>();
+  observations.filter((item) => item.date).forEach((item) => {
+    const key = `${item.date}::${item.session ?? 'session-unknown'}`;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  });
+  return [...groups.entries()].flatMap(([id, all]) => {
+    const work = all.filter((item) => !isExplicitSprintWarmup(item, minimumEffortPercent));
+    const metrics = work.flatMap((item) => { const metric = sprintSpeedMetric(item); return metric ? [metric] : []; });
+    if (!work.length || !metrics.length) return [];
+    const times = work.map((item) => item.timeSeconds);
+    const speeds = metrics.map((item) => item.averageSpeedMS);
+    return [{
+      id, date: work[0]!.date!, session: work[0]!.session, observations: work,
+      excludedWarmupCount: all.length - work.length,
+      fastestTimeSeconds: Math.min(...times), meanTimeSeconds: times.reduce((sum, value) => sum + value, 0) / times.length,
+      timeStandardDeviation: sampleStandardDeviation(times),
+      fastestSpeedMS: Math.max(...speeds), meanSpeedMS: speeds.reduce((sum, value) => sum + value, 0) / speeds.length,
+      speedStandardDeviation: sampleStandardDeviation(speeds),
+    }];
+  }).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 }
 
 export function sprintConsistency(observations: readonly SprintPerformance[], limit = 10): SprintConsistency | undefined {
