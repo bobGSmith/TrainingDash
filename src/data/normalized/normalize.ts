@@ -30,8 +30,17 @@ function trainingRows(rows: string[][]): TrainingSession[] {
 function dailyStatusRows(rows: string[][]): DailyStatusObservation[] {
   return rows.slice(1).flatMap((row, index) => row.every((cell) => optionalText(cell) == null) ? [] : [{
     kind: 'daily-status' as const, tab: 'Daily Status', rowNumber: index + 2, date: parseDate(row[0]),
-    timepoint: optionalText(row[1]), context: optionalText(row[2]), extra: parseExtra(row[3]), rawExtra: optionalText(row[3]), notes: optionalText(row[4]),
+    timepoint: optionalText(row[1]), context: optionalText(row[2]), extra: parseDailyMetadata(row[3]), rawExtra: optionalText(row[3]), notes: optionalText(row[4]),
   }]);
+}
+
+function parseDailyMetadata(value: unknown): Metadata | undefined {
+  const structured = parseExtra(value);
+  if (structured) return structured;
+  const text = optionalText(value);
+  if (!text) return undefined;
+  const entries = [...text.matchAll(/(?:^|;)\s*([a-z][a-z\s_-]*?)\s+(-?\d+(?:\.\d+)?)\s*(?:kg|\/\s*10)?(?=\s*;|$)/gi)].map((match) => [match[1]!.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'), Number(match[2])]);
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 function isCategory(row: TrainingSession, ...categories: string[]): boolean {

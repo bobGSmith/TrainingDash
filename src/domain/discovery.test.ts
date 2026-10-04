@@ -1,136 +1,155 @@
 import { describe, expect, it } from 'vitest';
-import type { NumericSeries } from './analysisVariables';
+import type { DiscoveryDomain, NumericSeries } from './analysisVariables';
 import { analyseSeries } from './analysis';
-import { benjaminiHochberg, discoverRelationships, discoverRelationshipsDetailed, discoveryScore, evaluateDiscoveryEligibility } from './discovery';
+import { benjaminiHochberg, classifyEvidence, discoverRelationshipsDetailed, discoveryScore, evaluateDiscoveryEligibility } from './discovery';
 
-function series(id: string, values: number[], dayOffset = 0): NumericSeries {
-  const observations = values.map((value, index) => ({ id: `${id}-${index}`, date: `2026-01-${String(index + 1 + dayOffset).padStart(2, '0')}`, value, label: id }));
-  return { id, exercise: id, metric: 'value', variable: 'value', label: 'Value', source: 'Full Session tracking', direction: 'neutral', observations, series: observations, discoveryEligible: true, metricFamily: 'PERFORMANCE', derivedFrom: [], sourceObservationIds: observations.map((item) => item.id), conceptId: `${id}:PERFORMANCE`, metadata: { category: 'Training', exerciseConcept: id } };
+const values = (n = 15) => Array.from({ length: n }, (_, index) => index + 1);
+
+function series(id: string, sample = values(), dayOffset = 0): NumericSeries {
+  const observations = sample.map((value, index) => ({ id: `${id}-${index}`, date: `2026-01-${String(index + 1 + dayOffset).padStart(2, '0')}`, value, label: id }));
+  return { id, exercise: id, metric: 'value', variable: 'value', label: 'Value', source: 'Full Session tracking', direction: 'higher', observations, series: observations, discoveryEligible: true, metricFamily: 'PERFORMANCE', derivedFrom: [], sourceObservationIds: observations.map((item) => item.id), conceptId: `${id}:PERFORMANCE`, metadata: { category: 'Training', exerciseConcept: id, exerciseId: id, domain: 'PERFORMANCE', discoveryConcept: id, role: 'OUTCOME', quality: 'RAW' } };
 }
 
-function semanticSeries(id: string, exercise: string, metricFamily: NumericSeries['metricFamily'], options: { derivedFrom?: string[]; sourceIds?: string[]; protocol?: string; structural?: boolean; quality?: NumericSeries['metadata']['athleticQuality'] } = {}): NumericSeries {
-  const result = series(id, [1, 2, 3, 4, 5, 6]);
+function semanticSeries(id: string, exercise: string, options: {
+  family?: NumericSeries['metricFamily']; domain?: DiscoveryDomain; concept?: string; metric?: string;
+  derivedFrom?: string[]; derived?: boolean; sourceIds?: string[]; protocol?: string; structural?: boolean;
+  prescription?: boolean; effortScope?: 'EXERCISE' | 'SESSION'; sessionIds?: string[]; direction?: NumericSeries['direction'];
+  sample?: number[]; dayOffset?: number; timepoint?: string;
+} = {}): NumericSeries {
+  const result = series(id, options.sample ?? values(), options.dayOffset ?? 0);
   result.exercise = exercise;
-  result.metricFamily = metricFamily;
+  result.metric = options.metric ?? 'value';
+  result.variable = result.metric;
+  result.metricFamily = options.family ?? 'PERFORMANCE';
   result.derivedFrom = options.derivedFrom ?? [];
+  result.derived = options.derived;
   result.sourceObservationIds = options.sourceIds ?? result.sourceObservationIds;
-  result.metadata.exerciseConcept = exercise;
-  result.metadata.protocol = options.protocol;
-  result.metadata.structuralVariable = options.structural;
-  result.metadata.athleticQuality = options.quality;
-  result.conceptId = `${exercise}:${metricFamily}`;
+  result.direction = options.direction ?? 'higher';
+  result.metadata = {
+    ...result.metadata,
+    exerciseConcept: exercise,
+    exerciseId: exercise.toLowerCase(),
+    protocol: options.protocol,
+    measurementProtocol: options.protocol,
+    structuralVariable: options.structural,
+    trainingPrescription: options.prescription,
+    effortScope: options.effortScope,
+    sourceSessionIds: options.sessionIds,
+    domain: options.domain ?? (result.metricFamily === 'TRAINING_LOAD' || result.metricFamily === 'EFFORT' ? 'TRAINING_EXPOSURE' : result.metricFamily),
+    discoveryConcept: options.concept ?? id,
+    timepoint: options.timepoint,
+  };
+  result.conceptId = `${exercise}:${result.metadata.discoveryConcept}`;
   return result;
 }
 
-describe('discovery screening', () => {
+describe('discovery utility screening', () => {
   it('applies monotonic Benjamini-Hochberg correction in original order', () => {
     expect(benjaminiHochberg([.01, .04, .03, .2])).toEqual([.04, .05333333333333334, .05333333333333334, .2]);
   });
 
-  it('filters relationships below the configured paired minimum n', () => {
-    expect(discoverRelationships([series('x', [1, 2, 3, 4, 5]), series('y', [2, 4, 6, 8, 10])], { minimumN: 6 })).toEqual([]);
-    const results = discoverRelationships([series('x', [1, 2, 3, 4, 5, 6]), series('y', [2, 4, 6, 8, 10, 12])], { minimumN: 6 });
-    expect(results).toHaveLength(1);
-    expect(results[0]).toMatchObject({ n: 6, pearsonR: 1, spearmanRho: 1, rawP: 0, qValue: 0 });
+  it('uses explicit evidence tiers and keeps n below 8 out of statistical testing', () => {
+    const tooSmall = discoverRelationshipsDetailed([series('strength', values(7)), series('jump', values(7))]);
+    expect(tooSmall.allResults).toEqual([]);
+    expect(tooSmall.rejectedCounts.INSUFFICIENT_N).toBe(1);
+    expect(classifyEvidence({ n: 8, pearsonR: .9, spearmanRho: .9, qValue: .01 })).toBe('EXPLORATORY');
+    expect(classifyEvidence({ n: 12, pearsonR: .5, spearmanRho: .5, qValue: .15 })).toBe('SUPPORTED');
+    expect(classifyEvidence({ n: 15, pearsonR: .6, spearmanRho: .55, qValue: .05 })).toBe('STRONG');
   });
 
-  it('requires usable paired dates, not just enough observations in each series', () => {
-    expect(discoverRelationships([series('x', [1, 2, 3, 4, 5, 6]), series('y', [2, 4, 6, 8, 10, 12], 10)], { minimumN: 6, strategy: 'same-day' })).toEqual([]);
+  it('makes semantic value the strongest ranking component while retaining evidence penalties', () => {
+    const useful = discoveryScore({ n: 15, pearsonR: .55, spearmanRho: .52, qValue: .08, semanticInterest: 2, evidenceTier: 'STRONG' });
+    const lowValue = discoveryScore({ n: 20, pearsonR: .8, spearmanRho: .78, qValue: .01, semanticInterest: .5, evidenceTier: 'STRONG' });
+    const weak = discoveryScore({ n: 8, pearsonR: .95, spearmanRho: .95, qValue: .5, semanticInterest: 2, evidenceTier: 'EXPLORATORY' });
+    expect(useful).toBeGreaterThan(lowValue);
+    expect(useful).toBeGreaterThan(weak);
   });
 
-  it('ranks supported, agreeing effects above tiny or disagreeing evidence', () => {
-    const supported = discoveryScore({ n: 20, pearsonR: .7, spearmanRho: .68, qValue: .02 });
-    const tiny = discoveryScore({ n: 6, pearsonR: .99, spearmanRho: .99, qValue: .4 });
-    const disagreeing = discoveryScore({ n: 20, pearsonR: .7, spearmanRho: -.4, qValue: .02 });
-    expect(supported).toBeGreaterThan(tiny);
-    expect(supported).toBeGreaterThan(disagreeing);
+  it('excludes the known same-exercise effort couplings', () => {
+    for (const exercise of ['Front squat', 'Clean pull']) {
+      const performance = semanticSeries(`${exercise}-performance`, exercise, { concept: 'STRENGTH' });
+      const rpe = semanticSeries(`${exercise}-rpe`, exercise, { family: 'EFFORT', concept: 'EXERCISE_RPE', metric: 'rpe', effortScope: 'EXERCISE' });
+      expect(evaluateDiscoveryEligibility(performance, rpe).reason).toBe('SAME_EXERCISE_EFFORT_COUPLING');
+    }
   });
 
-  it('excludes direct derivation and same-exercise performance redundancy', () => {
-    const intensity = semanticSeries('bss-intensity', 'Bulgarian split squat', 'PERFORMANCE');
-    const eightRep = semanticSeries('bss-8rm', 'Bulgarian split squat', 'PERFORMANCE', { derivedFrom: [intensity.id] });
-    const e1rm = semanticSeries('bss-e1rm', 'Bulgarian split squat', 'PERFORMANCE', { derivedFrom: [intensity.id, 'bss-reps'] });
-    expect(evaluateDiscoveryEligibility(intensity, e1rm).reason).toBe('DIRECT_DERIVATION');
-    expect(evaluateDiscoveryEligibility(eightRep, e1rm).reason).toBe('SAME_CONCEPT_REDUNDANCY');
+  it('excludes cross-exercise RPE relationships by default', () => {
+    const bss = semanticSeries('bss-intensity', 'Bulgarian split squat', { concept: 'STRENGTH', prescription: true });
+    const frontRpe = semanticSeries('front-rpe', 'Front squat', { family: 'EFFORT', concept: 'EXERCISE_RPE', metric: 'rpe', effortScope: 'EXERCISE' });
+    const backRpe = semanticSeries('back-rpe', 'Back squat', { family: 'EFFORT', concept: 'EXERCISE_RPE', metric: 'rpe', effortScope: 'EXERCISE' });
+    const frontStrength = semanticSeries('front-e1rm', 'Front squat', { concept: 'STRENGTH', derived: true });
+    expect(evaluateDiscoveryEligibility(bss, frontRpe).reason).toBe('LOW_VALUE_RPE_RELATIONSHIP');
+    expect(evaluateDiscoveryEligibility(backRpe, frontStrength).reason).toBe('LOW_VALUE_RPE_RELATIONSHIP');
   });
 
-  it('excludes back-squat performance variants while allowing cross-exercise performance', () => {
-    const intensity = semanticSeries('squat-intensity', 'Back squat', 'PERFORMANCE');
-    const fiveRep = semanticSeries('squat-5rm', 'Back squat', 'PERFORMANCE', { derivedFrom: [intensity.id] });
-    const e1rm = semanticSeries('squat-e1rm', 'Back squat', 'PERFORMANCE', { derivedFrom: [intensity.id, 'squat-reps'] });
-    const jump = semanticSeries('jump', 'Vertical jump', 'PERFORMANCE');
-    const fly = semanticSeries('fly', '10 m fly', 'PERFORMANCE');
-    expect(evaluateDiscoveryEligibility(fiveRep, e1rm).eligible).toBe(false);
-    expect(evaluateDiscoveryEligibility(intensity, fiveRep).eligible).toBe(false);
-    expect(evaluateDiscoveryEligibility(e1rm, jump).eligible).toBe(true);
-    expect(evaluateDiscoveryEligibility(e1rm, fly).eligible).toBe(true);
+  it('excludes training prescription and same-session training coupling', () => {
+    const setsA = semanticSeries('sets-a', 'Exercise A', { family: 'TRAINING_LOAD', concept: 'TRAINING_VOLUME', prescription: true });
+    const setsB = semanticSeries('sets-b', 'Exercise B', { family: 'TRAINING_LOAD', concept: 'TRAINING_VOLUME', prescription: true });
+    expect(evaluateDiscoveryEligibility(setsA, setsB).reason).toBe('TRAINING_PRESCRIPTION_COUPLING');
+    const sessionRpe = semanticSeries('session-rpe', 'Session', { family: 'EFFORT', concept: 'SESSION_RPE', effortScope: 'SESSION', sessionIds: ['s1', 's2'] });
+    const fatigue = semanticSeries('session-fatigue', 'Session state', { family: 'EFFORT', concept: 'SESSION_FATIGUE', sessionIds: ['s1', 's2'] });
+    expect(evaluateDiscoveryEligibility(sessionRpe, fatigue).reason).toBe('SAME_SESSION_TRAINING_COUPLING');
   });
 
-  it('allows useful same-exercise and symptom relationships across semantic families', () => {
-    const performance = semanticSeries('squat-performance', 'Back squat', 'PERFORMANCE');
-    const rpe = semanticSeries('squat-rpe', 'Back squat', 'EFFORT', { sourceIds: performance.sourceObservationIds });
-    const sprintVolume = semanticSeries('sprint-volume', 'Sprint exposure', 'TRAINING_LOAD');
-    const achillesPain = semanticSeries('achilles', 'Achilles morning pain', 'SYMPTOM');
-    expect(evaluateDiscoveryEligibility(performance, rpe).eligible).toBe(true);
-    expect(evaluateDiscoveryEligibility(sprintVolume, achillesPain).eligible).toBe(true);
+  it('uses lineage for direct, shared and invertible transformations', () => {
+    const time = semanticSeries('fly-time', '10 m fly', { concept: 'MAX_VELOCITY', direction: 'lower' });
+    const speed = semanticSeries('fly-speed', '10 m fly', { concept: 'MAX_VELOCITY', derived: true, derivedFrom: [time.id] });
+    expect(evaluateDiscoveryEligibility(time, speed).reason).toBe('DIRECT_DERIVATION');
+    const load = semanticSeries('load', 'Back squat', { concept: 'STRENGTH' });
+    const reps = semanticSeries('reps', 'Back squat', { family: 'TRAINING_LOAD', concept: 'TRAINING_VOLUME' });
+    const e1rm = semanticSeries('e1rm', 'Back squat', { concept: 'STRENGTH', derived: true, derivedFrom: [load.id, reps.id] });
+    const relative = semanticSeries('relative', 'Back squat', { concept: 'STRENGTH', derived: true, derivedFrom: [load.id, 'bodyweight'] });
+    expect(evaluateDiscoveryEligibility(e1rm, relative).reason).toBe('SHARED_DERIVATION');
   });
 
-  it('keeps semantically excluded relationships available to manual Explore analysis', () => {
-    const intensity = semanticSeries('squat-intensity', 'Back squat', 'PERFORMANCE');
-    const e1rm = semanticSeries('squat-e1rm', 'Back squat', 'PERFORMANCE', { derivedFrom: [intensity.id] });
-    expect(evaluateDiscoveryEligibility(intensity, e1rm).eligible).toBe(false);
-    expect(analyseSeries(intensity.observations, e1rm.observations, 'same-day').n).toBe(6);
-  });
-
-  it('identifies same-observation leakage only within the same semantic family', () => {
-    const sourceIds = ['a', 'b', 'c', 'd', 'e', 'f'];
-    const volumeA = semanticSeries('performance-a', 'Exercise A', 'PERFORMANCE', { sourceIds });
-    const volumeB = semanticSeries('performance-b', 'Exercise B', 'PERFORMANCE', { sourceIds });
-    volumeB.observations = volumeB.observations.map((item) => ({ ...item, value: item.value * 2 }));
-    volumeB.series = volumeB.observations;
-    expect(evaluateDiscoveryEligibility(volumeA, volumeB).reason).toBe('SAME_OBSERVATION_LEAKAGE');
-  });
-
-  it('collapses semantic duplicates in the shortlist but retains all analyses', () => {
-    const squatLoad = semanticSeries('squat-load', 'Back squat', 'PERFORMANCE');
-    const squatE1rm = semanticSeries('squat-e1rm', 'Back squat', 'PERFORMANCE');
-    const jump = semanticSeries('jump', 'Vertical jump', 'PERFORMANCE');
-    const report = discoverRelationshipsDetailed([squatLoad, squatE1rm, jump], { minimumN: 6 });
-    expect(report.allResults).toHaveLength(2);
-    expect(report.results).toHaveLength(1);
-    expect(report.results[0]?.relatedAnalysisCount).toBe(2);
-  });
-
-  it('excludes same-exercise structural coupling and cross-exercise programming structure', () => {
-    const amount = semanticSeries('squat-amount', 'Back squat', 'TRAINING_LOAD', { structural: true });
-    const intensity = semanticSeries('squat-intensity', 'Back squat', 'PERFORMANCE', { structural: true, quality: 'STRENGTH' });
-    const cleanPullSets = semanticSeries('pull-sets', 'Clean pull', 'TRAINING_LOAD', { structural: true });
-    const frontSquatSets = semanticSeries('front-sets', 'Front squat', 'TRAINING_LOAD', { structural: true });
-    const bssLoad = semanticSeries('bss-8rm', 'Bulgarian split squat', 'PERFORMANCE', { quality: 'STRENGTH' });
-    const bssVolume = semanticSeries('bss-volume', 'Bulgarian split squat', 'TRAINING_LOAD', { structural: true, derivedFrom: [bssLoad.id] });
-    expect(evaluateDiscoveryEligibility(amount, intensity).reason).toBe('SAME_CONCEPT_REDUNDANCY');
-    expect(evaluateDiscoveryEligibility(cleanPullSets, frontSquatSets).reason).toBe('STRUCTURAL_RELATIONSHIP');
-    expect(evaluateDiscoveryEligibility(bssLoad, bssVolume).eligible).toBe(false);
-  });
-
-  it('allows the requested cross-domain athletic relationships', () => {
-    const squat = semanticSeries('squat', 'Back squat', 'PERFORMANCE', { quality: 'STRENGTH' });
-    const jump = semanticSeries('jump', 'Vertical jump', 'PERFORMANCE', { quality: 'JUMP' });
-    const fly = semanticSeries('fly', '10 m fly', 'PERFORMANCE', { quality: 'MAX_VELOCITY' });
-    const bodyweight = semanticSeries('bodyweight', 'Body metrics', 'BODY_METRIC');
-    const recovery = semanticSeries('recovery', 'Morning readiness', 'RECOVERY');
-    const volume = semanticSeries('volume', 'Sprint exposure', 'TRAINING_LOAD');
-    expect(evaluateDiscoveryEligibility(squat, jump).eligible).toBe(true);
+  it('keeps high-value cross-domain hypotheses eligible in principle', () => {
+    const strength = semanticSeries('squat', 'Back squat', { concept: 'STRENGTH' });
+    const jump = semanticSeries('jump', 'Vertical jump', { concept: 'JUMP', direction: 'higher' });
+    const fly = semanticSeries('fly', '10 m fly', { concept: 'MAX_VELOCITY', direction: 'lower' });
+    const bodyweight = semanticSeries('bodyweight', 'Body metrics', { family: 'BODY_METRIC', domain: 'BODY_METRIC', concept: 'BODYWEIGHT' });
+    const sprintExposure = semanticSeries('sprint-volume', 'Sprint exposure', { family: 'TRAINING_LOAD', concept: 'TRAINING_VOLUME' });
+    const achilles = semanticSeries('achilles', 'Achilles morning pain', { family: 'SYMPTOM', domain: 'SYMPTOM', concept: 'ACHILLES_SYMPTOM' });
+    expect(evaluateDiscoveryEligibility(strength, jump).eligible).toBe(true);
     expect(evaluateDiscoveryEligibility(jump, fly).eligible).toBe(true);
-    expect(evaluateDiscoveryEligibility(bodyweight, jump).eligible).toBe(true);
     expect(evaluateDiscoveryEligibility(bodyweight, fly).eligible).toBe(true);
-    expect(evaluateDiscoveryEligibility(volume, recovery).eligible).toBe(true);
+    expect(evaluateDiscoveryEligibility(bodyweight, jump).eligible).toBe(true);
+    expect(evaluateDiscoveryEligibility(sprintExposure, achilles).eligible).toBe(true);
+  });
+
+  it('pairs exposure to symptoms from +1 day and never calls day 0 delayed', () => {
+    const exposure = semanticSeries('sprint-volume', 'Sprint exposure', { family: 'TRAINING_LOAD', concept: 'TRAINING_VOLUME', sample: values(12) });
+    const symptoms = semanticSeries('achilles', 'Achilles morning pain', { family: 'SYMPTOM', domain: 'SYMPTOM', concept: 'ACHILLES_SYMPTOM', sample: values(12), dayOffset: 1, timepoint: 'Morning' });
+    const result = discoverRelationshipsDetailed([exposure, symptoms]).allResults[0];
+    expect(result).toMatchObject({ pairingStrategy: 'forward-lag-delayed', minimumLagDays: 1, lagLabel: '+1–3 days' });
+    expect(result?.meanAbsoluteDateDifference).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not put n=7 with poor FDR into Interesting', () => {
+    const strength = semanticSeries('front-5rep', 'Front squat', { concept: 'STRENGTH', sample: values(7) });
+    const symptom = semanticSeries('symptom', 'Front squat symptom', { family: 'SYMPTOM', domain: 'SYMPTOM', concept: 'PATELLAR_SYMPTOM', sample: [1, 3, 2, 5, 4, 7, 6] });
+    expect(discoverRelationshipsDetailed([strength, symptom]).interestingResults).toEqual([]);
+  });
+
+  it('collapses alternate metrics into one conceptual hypothesis', () => {
+    const squat = semanticSeries('squat-e1rm', 'Back squat', { concept: 'STRENGTH', sample: values(15) });
+    const squatFive = semanticSeries('squat-5rep', 'Back squat', { concept: 'STRENGTH', sample: values(15).map((x) => x + .1) });
+    const jump = semanticSeries('jump', 'Vertical jump', { concept: 'JUMP', sample: values(15) });
+    const report = discoverRelationshipsDetailed([squat, squatFive, jump]);
+    expect(report.allResults).toHaveLength(2);
+    expect(report.interestingResults).toHaveLength(1);
+    expect(report.interestingResults[0]?.relatedAnalysisCount).toBe(2);
+  });
+
+  it('keeps excluded relationships manually selectable in Explore', () => {
+    const performance = semanticSeries('front-e1rm', 'Front squat', { concept: 'STRENGTH' });
+    const rpe = semanticSeries('front-rpe', 'Front squat', { family: 'EFFORT', concept: 'EXERCISE_RPE', metric: 'rpe', effortScope: 'EXERCISE' });
+    expect(evaluateDiscoveryEligibility(performance, rpe).eligible).toBe(false);
+    expect(analyseSeries(performance.observations, rpe.observations, 'same-day').n).toBe(15);
   });
 
   it('excludes static longitudinal profile series', () => {
-    const height = semanticSeries('height', 'Body metrics', 'BODY_METRIC');
-    height.observations = height.observations.map((item) => ({ ...item, value: 180 }));
-    height.series = height.observations;
-    expect(evaluateDiscoveryEligibility(height, semanticSeries('jump', 'Jump', 'PERFORMANCE', { quality: 'JUMP' })).reason).toBe('STATIC_SERIES');
+    const height = semanticSeries('height', 'Body metrics', { family: 'BODY_METRIC', domain: 'BODY_METRIC', concept: 'HEIGHT', sample: Array(15).fill(180) });
+    const jump = semanticSeries('jump', 'Vertical jump', { concept: 'JUMP' });
+    expect(evaluateDiscoveryEligibility(height, jump).reason).toBe('STATIC_SERIES');
   });
 });

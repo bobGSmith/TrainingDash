@@ -1,4 +1,4 @@
-import type { AthleteConfig, SheetTab } from '../../config/athletes';
+import { SHEET_TAB_ALIASES, type AthleteConfig, type SheetTab } from '../../config/athletes';
 import type { RawSheet, RawWorkbook } from '../raw/types';
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -49,7 +49,8 @@ export function resolveTabTitles(
   const resolved = new Map<SheetTab, string>();
   for (const tab of requested) {
     const exact = available.find((title) => title === tab);
-    const tolerant = available.find((title) => comparableTitle(title) === comparableTitle(tab));
+    const acceptedTitles = [tab, ...(SHEET_TAB_ALIASES[tab] ?? [])];
+    const tolerant = available.find((title) => acceptedTitles.some((candidate) => comparableTitle(title) === comparableTitle(candidate)));
     const title = exact ?? tolerant;
     if (title) resolved.set(tab, title);
   }

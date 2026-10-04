@@ -37,6 +37,12 @@ describe('temporal pairing', () => {
     expect(pairs.map((pair) => [pair.y.id, pair.dayDifference])).toEqual([['plus2', 2]]);
   });
 
+  it('keeps delayed response pairing separate from same-day response', () => {
+    const exposure = [point('training', '2026-01-10', 1)];
+    const symptoms = [point('same-day', '2026-01-10', 1), point('next-day', '2026-01-11', 2)];
+    expect(pairSeries(exposure, symptoms, 'forward-lag-delayed', 3).map((pair) => [pair.y.id, pair.dayDifference])).toEqual([['next-day', 1]]);
+  });
+
   it('deterministically pairs duplicate-date observations one-to-one', () => {
     const pairs = pairSeries(
       [point('x2', '2026-01-01', 2), point('x1', '2026-01-01', 1)],

@@ -11,6 +11,7 @@ describe('numeric series registry', () => {
     const time = registry.find((item) => item.metric === 'intensity');
     expect(time?.higherIsBetter).toBe(false);
     expect(time?.metadata.category).toBe('Sprint');
+    expect(time?.metadata).toMatchObject({ domain: 'PERFORMANCE', discoveryConcept: 'MAX_VELOCITY', role: 'OUTCOME', quality: 'RAW' });
   });
 
   it('keeps explicitly incompatible measurement protocols in separate series', () => {
@@ -52,5 +53,16 @@ describe('numeric series registry', () => {
     const registry = buildAnalysisVariables(data);
     expect(registry.find((item) => item.id === 'daily-status::tendon_pain::Morning')?.metadata.timepoint).toBe('Morning');
     expect(registry.find((item) => item.id === 'body-metric::bodyweight_kg')?.observations.map((item) => item.value)).toEqual([80, 81]);
+  });
+
+  it('combines bodyweight aliases into one dated longitudinal series', () => {
+    const data = workbook([]);
+    data.dailyStatus = [
+      { kind: 'daily-status', tab: 'Daily Status', rowNumber: 2, date: '2026-09-29', timepoint: 'Morning', extra: { bodyweight: 82.5 } },
+      { kind: 'daily-status', tab: 'Daily Status', rowNumber: 3, date: '2026-10-04', timepoint: 'Morning', extra: { bodyweight_kg: 82.6 } },
+    ];
+    const bodyweight = buildAnalysisVariables(data).find((item) => item.id === 'body-metric::bodyweight_kg');
+    expect(bodyweight?.observations.map((item) => item.value)).toEqual([82.5, 82.6]);
+    expect(bodyweight?.metadata).toMatchObject({ domain: 'BODY_METRIC', discoveryConcept: 'BODYWEIGHT', role: 'STATE' });
   });
 });

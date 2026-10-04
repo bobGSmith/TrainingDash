@@ -9,6 +9,10 @@ export const SHEET_TABS = [
 
 export type SheetTab = (typeof SHEET_TABS)[number];
 
+export const SHEET_TAB_ALIASES: Partial<Record<SheetTab, readonly string[]>> = {
+  'Daily Status': ['Daily Metrics'],
+};
+
 export interface AthleteConfig {
   id: string;
   name: string;

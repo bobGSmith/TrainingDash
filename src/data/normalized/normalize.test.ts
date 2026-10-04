@@ -57,6 +57,15 @@ describe('normalisation', () => {
     expect(result.training).toEqual([]);
   });
 
+  it('extracts numeric legacy Daily Metrics text without inventing missing values', () => {
+    const result = normalizeWorkbook(workbook({ 'Daily Status': [
+      ['Date', 'Timepoint', 'Context', 'Extra', 'Notes'],
+      ['2026-09-29', 'Morning', 'Daily metrics', 'Bodyweight 82.5 kg; Achilles pain 2.5/10; slightly improved', 'Morning observation.'],
+    ] }));
+    expect(result.dailyStatus[0]?.extra).toEqual({ bodyweight: 82.5, achilles_pain: 2.5 });
+    expect(result.dailyStatus[0]?.extra?.slightly_improved).toBeUndefined();
+  });
+
   it('derives sprint, jump, and strength performances from canonical session rows', () => {
     const result = normalizeWorkbook(workbook({
       'Full Session tracking': [

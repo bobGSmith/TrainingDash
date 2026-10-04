@@ -21,4 +21,8 @@ describe('spreadsheet tab discovery', () => {
   it('leaves genuinely absent tabs unresolved', () => {
     expect(resolveTabTitles(['Daily Status'], ['Program']).has('Daily Status')).toBe(false);
   });
+
+  it('resolves the canonical Daily Status dataset from its current Daily Metrics tab name', () => {
+    expect(resolveTabTitles(['Daily Status'], ['Full Session tracking', 'Daily Metrics']).get('Daily Status')).toBe('Daily Metrics');
+  });
 });
